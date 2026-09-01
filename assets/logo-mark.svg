@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="شفاء">
+  <rect width="64" height="64" rx="15" fill="#0f766e"/>
+  <path fill="#fff" d="M27 15h10v12h12v10H37v12H27V37H15V27h12z"/>
+  <path fill="#73d1c8" d="M43.8 14.7a8.2 8.2 0 0 1 0 11.6L40 30l-6-6 3.7-3.8a8.2 8.2 0 0 1 6.1-5.5z" opacity=".9"/>
+</svg>

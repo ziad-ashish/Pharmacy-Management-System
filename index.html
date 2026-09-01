@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>شفاء OS — إدارة الصيدلية</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700;900&family=Amiri:wght@400;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
+  <link rel="stylesheet" href="src/css/main.css" />
+  <link rel="stylesheet" href="src/css/components.css" />
+  <link rel="stylesheet" href="src/css/professional.css" />
+</head>
+<body>
+
+  <!-- ═══════════════════════════════════════
+       LOGIN SCREEN
+  ═══════════════════════════════════════ -->
+  <div id="loginScreen" class="login-screen">
+    <div class="login-bg">
+      <div class="bg-deco deco-1"><i class="fas fa-prescription-bottle-medical"></i></div>
+      <div class="bg-deco deco-2"><i class="fas fa-pills"></i></div>
+      <div class="bg-deco deco-3"><i class="fas fa-heart-pulse"></i></div>
+      <div class="bg-deco deco-4"><i class="fas fa-stethoscope"></i></div>
+    </div>
+    <div class="login-wrap">
+      <div class="login-card">
+        <div class="login-brand">
+          <div class="login-icon" id="loginIconWrap"><img src="assets/logo-mark.svg" alt="شفاء" /></div>
+          <h1 class="login-title" id="loginTitle">صيدلية الشفاء</h1>
+          <p class="login-sub">نظام إدارة صيدلية متكامل</p>
+        </div>
+        <form id="loginForm" class="login-form" autocomplete="off">
+          <div class="form-group">
+            <label class="form-label">
+              <i class="fas fa-user-lock"></i> اسم المستخدم
+            </label>
+            <div class="input-wrap">
+              <i class="fas fa-user input-ico"></i>
+              <input type="text" id="loginUsername" class="form-input" name="username" autocomplete="username" placeholder="أدخل اسم المستخدم" autofocus />
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">
+              <i class="fas fa-key"></i> كلمة المرور
+            </label>
+            <div class="input-wrap">
+              <i class="fas fa-lock input-ico"></i>
+              <input type="password" id="loginPassword" class="form-input" name="password" autocomplete="current-password" placeholder="أدخل كلمة المرور" />
+              <button type="button" class="toggle-pwd" id="togglePwd" title="إظهار كلمة المرور">
+                <i class="fas fa-eye"></i>
+              </button>
+            </div>
+          </div>
+          <div class="form-row">
+            <label class="check-wrap">
+              <input type="checkbox" id="rememberMe" />
+              <span class="check-box"><i class="fas fa-check"></i></span>
+              <span class="check-label">تذكرني</span>
+            </label>
+          </div>
+          <div id="loginError" class="login-error hidden">
+            <i class="fas fa-circle-exclamation"></i>
+            <span id="loginErrorText"></span>
+          </div>
+          <button type="submit" class="btn-login" id="btnLogin">
+            <span class="btn-login-text">تسجيل الدخول</span>
+            <span class="btn-login-spin hidden"><i class="fas fa-spinner fa-spin"></i></span>
+          </button>
+        </form>
+        <div class="login-security"><i class="fas fa-shield-halved"></i> اتصال محلي آمن بقاعدة بيانات الصيدلية</div>
+      </div>
+      <div class="login-copy">
+        <span>© 2026 صيدلية الشفاء — جميع الحقوق محفوظة</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════
+       SPLASH SCREEN
+  ═══════════════════════════════════════ -->
+  <div id="splashScreen" class="splash-screen hidden">
+    <div class="splash-inner">
+      <div class="splash-logo-wrap">
+        <div class="splash-icon-ring" id="splashIconWrap"><img src="assets/logo-mark.svg" alt="شفاء" /></div>
+      </div>
+      <h1 class="splash-title" id="splashTitle">صيدلية الشفاء</h1>
+      <p class="splash-sub">نظام إدارة صيدلية متكامل واحترافي</p>
+      <div class="splash-loader-wrap">
+        <div class="splash-loader-bar">
+          <div class="splash-loader-fill" id="splashFill"></div>
+        </div>
+        <span class="splash-loader-pct" id="splashPct">0%</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════
+       APP SHELL
+  ═══════════════════════════════════════ -->
+  <div id="appShell" class="app-shell hidden">
+
+    <!-- ── SIDEBAR ── -->
+    <aside class="sidebar" id="sidebar">
+
+      <div class="sidebar-head">
+        <div class="brand">
+          <div class="brand-icon" id="brandIconWrap"><img src="assets/logo-mark.svg" alt="شفاء" /></div>
+          <div class="brand-info">
+            <span class="brand-name" id="brandName">الشفاء</span>
+            <span class="brand-sub">PHARMACY OS</span>
+          </div>
+        </div>
+        <button class="btn-collapse" id="btnCollapse" title="طي القائمة">
+          <i class="fas fa-angles-right"></i>
+        </button>
+      </div>
+
+      <nav class="sidebar-nav">
+
+        <span class="nav-group-label">الرئيسية</span>
+        <ul>
+          <li class="nav-item active" data-page="dashboard">
+            <a href="#" class="nav-link">
+              <span class="nl-icon"><i class="fas fa-chart-pie"></i></span>
+              <span class="nl-text">لوحة التحكم</span>
+            </a>
+          </li>
+        </ul>
+
+        <span class="nav-group-label">التشغيل اليومي</span>
+        <ul>
+          <li class="nav-item" data-page="medicines">
+            <a href="#" class="nav-link">
+              <span class="nl-icon"><i class="fas fa-pills"></i></span>
+              <span class="nl-text">الأدوية والمخزون</span>
+              <span class="nl-badge" id="badgeLow"></span>
+            </a>
+          </li>
+          <li class="nav-item" data-page="sales">
+            <a href="#" class="nav-link">
+              <span class="nl-icon"><i class="fas fa-cash-register"></i></span>
+              <span class="nl-text">نقطة البيع</span>
+            </a>
+          </li>
+          <li class="nav-item" data-page="invoices">
+            <a href="#" class="nav-link">
+              <span class="nl-icon"><i class="fas fa-file-invoice-dollar"></i></span>
+              <span class="nl-text">الفواتير</span>
+            </a>
+          </li>
+        </ul>
+
+        <span class="nav-group-label">البيانات والإدارة</span>
+        <ul>
+          <li class="nav-item" data-page="patients">
+            <a href="#" class="nav-link">
+              <span class="nl-icon"><i class="fas fa-user-injured"></i></span>
+              <span class="nl-text">المرضى</span>
+            </a>
+          </li>
+          <li class="nav-item" data-page="suppliers">
+            <a href="#" class="nav-link">
+              <span class="nl-icon"><i class="fas fa-truck-medical"></i></span>
+              <span class="nl-text">الموردون</span>
+            </a>
+          </li>
+          <li class="nav-item" data-page="reports">
+            <a href="#" class="nav-link">
+              <span class="nl-icon"><i class="fas fa-chart-bar"></i></span>
+              <span class="nl-text">التقارير</span>
+            </a>
+          </li>
+        </ul>
+
+      </nav>
+
+      <div class="sidebar-foot">
+        <div class="user-pill" id="userPill">
+          <div class="user-ava" id="userAva">أح</div>
+          <div class="user-meta">
+            <span class="user-nm" id="userNm">د. أحمد محمد</span>
+            <span class="user-rl" id="userRl">صيدلاني مسؤول</span>
+          </div>
+          <button class="user-menu-btn" id="userMenuBtn" title="الخيارات">
+            <i class="fas fa-ellipsis-vertical"></i>
+          </button>
+        </div>
+        <div class="user-menu hidden" id="userMenu">
+          <div class="um-item" id="umProfile">
+            <i class="fas fa-user-circle"></i>
+            <span>الملف الشخصي</span>
+          </div>
+          <div class="um-item" id="umChangePwd">
+            <i class="fas fa-key"></i>
+            <span>تغيير كلمة المرور</span>
+          </div>
+          <div class="um-item" id="umSettings">
+            <i class="fas fa-gear"></i>
+            <span>الإعدادات</span>
+          </div>
+          <div class="um-sep"></div>
+          <div class="um-item um-logout" id="umLogout">
+            <i class="fas fa-right-from-bracket"></i>
+            <span>تسجيل الخروج</span>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ── MOBILE OVERLAY ── -->
+    <div class="mob-overlay" id="mobOverlay"></div>
+
+    <!-- ── MAIN ── -->
+    <div class="main-wrap" id="mainWrap">
+
+      <!-- TOP BAR -->
+      <header class="topbar">
+        <div class="topbar-r">
+          <button class="btn-mob-menu" id="btnMobMenu"><i class="fas fa-bars"></i></button>
+          <nav class="breadcrumb" id="breadcrumb">
+            <i class="fas fa-home bc-home"></i>
+            <i class="fas fa-chevron-left bc-sep"></i>
+            <span id="bcLabel">لوحة التحكم</span>
+          </nav>
+        </div>
+        <div class="topbar-l">
+          <div class="tb-search">
+            <i class="fas fa-magnifying-glass"></i>
+            <input type="search" id="globalSearch" placeholder="بحث سريع في الأدوية..." autocomplete="off" />
+          </div>
+          <button class="tb-icon-btn notif-btn" id="notifBtn">
+            <i class="fas fa-bell"></i>
+            <span class="notif-badge hidden" id="notifBadge">0</span>
+          </button>
+          <div class="tb-clock" id="tbClock"></div>
+        </div>
+      </header>
+
+      <!-- PAGES -->
+      <div class="page-host" id="pageHost">
+        <!-- injected by JS -->
+      </div>
+
+    </div><!-- /main-wrap -->
+  </div><!-- /app-shell -->
+
+  <!-- ═══════════════════════════════════════
+       GLOBAL MODAL
+  ═══════════════════════════════════════ -->
+  <div class="g-overlay" id="gOverlay"></div>
+  <div class="g-modal" id="gModal" role="dialog" aria-modal="true">
+    <div class="gm-head">
+      <h2 class="gm-title" id="gModalTitle"></h2>
+      <button class="gm-close" id="gModalClose"><i class="fas fa-xmark"></i></button>
+    </div>
+    <div class="gm-body" id="gModalBody"></div>
+    <div class="gm-foot" id="gModalFoot"></div>
+  </div>
+
+  <!-- ═══════════════════════════════════════
+       TOAST STACK
+  ═══════════════════════════════════════ -->
+  <div class="toast-stack" id="toastStack"></div>
+
+  <!-- ═══════════════════════════════════════
+       NOTIFICATIONS PANEL
+  ═══════════════════════════════════════ -->
+  <div class="notif-panel" id="notifPanel">
+    <div class="np-head">
+      <span class="np-title"><i class="fas fa-bell"></i> الإشعارات</span>
+      <button class="np-close" id="npClose"><i class="fas fa-xmark"></i></button>
+    </div>
+    <div class="np-body" id="npBody"></div>
+  </div>
+
+  <!-- ═══════════════════════════════════════
+       SEARCH RESULTS DROPDOWN
+  ═══════════════════════════════════════ -->
+  <div class="search-drop hidden" id="searchDrop"></div>
+
+  <!-- JS -->
+  <script src="src/js/data.js"></script>
+  <script src="src/js/theme.js"></script>
+  <script src="src/js/utils.js"></script>
+  <script src="src/js/pages/dashboard.js"></script>
+  <script src="src/js/pages/medicines.js"></script>
+  <script src="src/js/pages/sales.js"></script>
+  <script src="src/js/pages/invoices.js"></script>
+  <script src="src/js/pages/patients.js"></script>
+  <script src="src/js/pages/suppliers.js"></script>
+  <script src="src/js/pages/reports.js"></script>
+  <script src="src/js/pages/settings.js"></script>
+  <script src="src/js/app.js"></script>
+
+</body>
+</html>

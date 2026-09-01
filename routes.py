@@ -1,0 +1,252 @@
+# ══════════════════════════════════════════════════════════════
+#  ROUTES.PY  —  Flask REST API endpoints
+#  كل method في PharmacyAPI بتبقى endpoint على /api/<method>
+#  الـ JS بينادي fetch('/api/method', {method:'POST', body:...})
+# ══════════════════════════════════════════════════════════════
+
+import json
+from flask import request, jsonify
+from api import PharmacyAPI
+
+_api = PharmacyAPI()
+
+
+def _resp(raw: str):
+    """تحوّل الـ JSON string اللي بترجعه api.py لـ Flask Response."""
+    data = json.loads(raw)
+    return jsonify(data)
+
+
+def register_routes(app):
+    """بتسجل كل الـ routes على الـ Flask app."""
+
+    # ── MEDICINES ─────────────────────────────────────────────
+    @app.route("/api/get_medicines")
+    def get_medicines():
+        return _resp(_api.get_medicines())
+
+    @app.route("/api/get_medicine/<mid>")
+    def get_medicine(mid):
+        return _resp(_api.get_medicine(mid))
+
+    @app.route("/api/get_medicine_by_barcode/<path:barcode>")
+    def get_medicine_by_barcode(barcode):
+        return _resp(_api.get_medicine_by_barcode(barcode))
+
+    @app.route("/api/add_medicine", methods=["POST"])
+    def add_medicine():
+        body    = request.get_json(force=True) or {}
+        user_id = body.pop("__user_id", None)
+        return _resp(_api.add_medicine(json.dumps(body), user_id))
+
+    @app.route("/api/update_medicine/<mid>", methods=["POST"])
+    def update_medicine(mid):
+        body    = request.get_json(force=True) or {}
+        user_id = body.pop("__user_id", None)
+        return _resp(_api.update_medicine(mid, json.dumps(body), user_id))
+
+    @app.route("/api/delete_medicine/<mid>", methods=["POST"])
+    def delete_medicine(mid):
+        body    = request.get_json(force=True) or {}
+        user_id = body.get("__user_id")
+        return _resp(_api.delete_medicine(mid, user_id))
+
+    @app.route("/api/get_low_stock")
+    def get_low_stock():
+        return _resp(_api.get_low_stock())
+
+    @app.route("/api/get_expiring")
+    def get_expiring():
+        return _resp(_api.get_expiring())
+
+    @app.route("/api/get_categories")
+    def get_categories():
+        return _resp(_api.get_categories())
+
+    # ── PATIENTS ──────────────────────────────────────────────
+    @app.route("/api/get_patients")
+    def get_patients():
+        return _resp(_api.get_patients())
+
+    @app.route("/api/get_patient/<pid>")
+    def get_patient(pid):
+        return _resp(_api.get_patient(pid))
+
+    @app.route("/api/add_patient", methods=["POST"])
+    def add_patient():
+        body    = request.get_json(force=True) or {}
+        user_id = body.pop("__user_id", None)
+        return _resp(_api.add_patient(json.dumps(body), user_id))
+
+    @app.route("/api/update_patient/<pid>", methods=["POST"])
+    def update_patient(pid):
+        body    = request.get_json(force=True) or {}
+        user_id = body.pop("__user_id", None)
+        return _resp(_api.update_patient(pid, json.dumps(body), user_id))
+
+    @app.route("/api/delete_patient/<pid>", methods=["POST"])
+    def delete_patient(pid):
+        body    = request.get_json(force=True) or {}
+        user_id = body.get("__user_id")
+        return _resp(_api.delete_patient(pid, user_id))
+
+    # ── SUPPLIERS ─────────────────────────────────────────────
+    @app.route("/api/get_suppliers")
+    def get_suppliers():
+        return _resp(_api.get_suppliers())
+
+    @app.route("/api/get_supplier/<sid>")
+    def get_supplier(sid):
+        return _resp(_api.get_supplier(sid))
+
+    @app.route("/api/add_supplier", methods=["POST"])
+    def add_supplier():
+        body    = request.get_json(force=True) or {}
+        user_id = body.pop("__user_id", None)
+        return _resp(_api.add_supplier(json.dumps(body), user_id))
+
+    @app.route("/api/update_supplier/<sid>", methods=["POST"])
+    def update_supplier(sid):
+        body    = request.get_json(force=True) or {}
+        user_id = body.pop("__user_id", None)
+        return _resp(_api.update_supplier(sid, json.dumps(body), user_id))
+
+    @app.route("/api/delete_supplier/<sid>", methods=["POST"])
+    def delete_supplier(sid):
+        body    = request.get_json(force=True) or {}
+        user_id = body.get("__user_id")
+        return _resp(_api.delete_supplier(sid, user_id))
+
+    # ── SALES ─────────────────────────────────────────────────
+    @app.route("/api/get_sales")
+    def get_sales():
+        return _resp(_api.get_sales())
+
+    @app.route("/api/get_sale/<sale_id>")
+    def get_sale(sale_id):
+        return _resp(_api.get_sale(sale_id))
+
+    @app.route("/api/add_sale", methods=["POST"])
+    def add_sale():
+        body    = request.get_json(force=True) or {}
+        user_id = body.pop("__user_id", None)
+        return _resp(_api.add_sale(json.dumps(body), user_id))
+
+    @app.route("/api/void_sale/<sale_id>", methods=["POST"])
+    def void_sale(sale_id):
+        body    = request.get_json(force=True) or {}
+        user_id = body.get("__user_id")
+        return _resp(_api.void_sale(sale_id, user_id))
+
+    # ── STATS / REPORTS ───────────────────────────────────────
+    @app.route("/api/get_stats")
+    def get_stats():
+        return _resp(_api.get_stats())
+
+    @app.route("/api/get_monthly_sales")
+    def get_monthly_sales():
+        return _resp(_api.get_monthly_sales())
+
+    @app.route("/api/get_top_medicines")
+    def get_top_medicines():
+        return _resp(_api.get_top_medicines())
+
+    @app.route("/api/get_category_dist")
+    def get_category_dist():
+        return _resp(_api.get_category_dist())
+
+    @app.route("/api/get_recent_activity")
+    def get_recent_activity():
+        return _resp(_api.get_recent_activity())
+
+    @app.route("/api/get_profit_report")
+    @app.route("/api/get_profit_report/<period>")
+    def get_profit_report(period="all"):
+        return _resp(_api.get_profit_report(period))
+
+    # ── SETTINGS ──────────────────────────────────────────────
+    @app.route("/api/get_setting/<key>")
+    def get_setting(key):
+        return _resp(_api.get_setting(key))
+
+    @app.route("/api/set_setting", methods=["POST"])
+    def set_setting():
+        body = request.get_json(force=True) or {}
+        return _resp(_api.set_setting(body.get("key",""), body.get("value","")))
+
+    # ── BACKUP ────────────────────────────────────────────────
+    @app.route("/api/backup_database", methods=["POST"])
+    def backup_database():
+        return _resp(_api.backup_database())
+
+    @app.route("/api/list_backups")
+    def list_backups():
+        return _resp(_api.list_backups())
+
+    @app.route("/api/restore_database", methods=["POST"])
+    def restore_database():
+        body = request.get_json(force=True) or {}
+        return _resp(_api.restore_database(body.get("backup_path","")))
+
+    # ── AUDIT LOG ─────────────────────────────────────────────
+    @app.route("/api/get_audit_log")
+    def get_audit_log():
+        limit  = int(request.args.get("limit",  100))
+        offset = int(request.args.get("offset", 0))
+        return _resp(_api.get_audit_log(limit, offset))
+
+    # ── AUTH ──────────────────────────────────────────────────
+    @app.route("/api/login", methods=["POST"])
+    def login():
+        body = request.get_json(force=True) or {}
+        return _resp(_api.login(body.get("username",""), body.get("password","")))
+
+    @app.route("/api/get_users")
+    def get_users():
+        return _resp(_api.get_users())
+
+    @app.route("/api/get_current_user/<uid>")
+    def get_current_user(uid):
+        return _resp(_api.get_current_user(uid))
+
+    @app.route("/api/change_password", methods=["POST"])
+    def change_password():
+        body = request.get_json(force=True) or {}
+        return _resp(_api.change_password(
+            body.get("uid",""),
+            body.get("old_pwd",""),
+            body.get("new_pwd","")
+        ))
+
+    @app.route("/api/check_permission", methods=["POST"])
+    def check_permission():
+        body = request.get_json(force=True) or {}
+        return _resp(_api.check_permission(
+            body.get("user_id",""),
+            body.get("perm","")
+        ))
+
+    # ── USER MANAGEMENT ───────────────────────────────────────
+    @app.route("/api/add_user", methods=["POST"])
+    def add_user():
+        body      = request.get_json(force=True) or {}
+        caller_id = body.pop("__user_id", None)
+        return _resp(_api.add_user(json.dumps(body), caller_id))
+
+    @app.route("/api/update_user/<uid>", methods=["POST"])
+    def update_user(uid):
+        body      = request.get_json(force=True) or {}
+        caller_id = body.pop("__user_id", None)
+        return _resp(_api.update_user(uid, json.dumps(body), caller_id))
+
+    @app.route("/api/delete_user/<uid>", methods=["POST"])
+    def delete_user(uid):
+        body      = request.get_json(force=True) or {}
+        caller_id = body.get("__user_id")
+        return _resp(_api.delete_user(uid, caller_id))
+
+    @app.route("/api/reset_user_password/<uid>", methods=["POST"])
+    def reset_user_password(uid):
+        body      = request.get_json(force=True) or {}
+        caller_id = body.pop("__user_id", None)
+        return _resp(_api.reset_user_password(uid, json.dumps(body), caller_id))
