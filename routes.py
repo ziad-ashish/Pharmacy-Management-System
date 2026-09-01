@@ -250,3 +250,130 @@ def register_routes(app):
         body      = request.get_json(force=True) or {}
         caller_id = body.pop("__user_id", None)
         return _resp(_api.reset_user_password(uid, json.dumps(body), caller_id))
+
+    # ── PURCHASES ─────────────────────────────────────────────
+    @app.route("/api/get_purchases")
+    def get_purchases():
+        return _resp(_api.get_purchases())
+
+    @app.route("/api/get_purchase/<pid>")
+    def get_purchase(pid):
+        return _resp(_api.get_purchase(pid))
+
+    @app.route("/api/add_purchase", methods=["POST"])
+    def add_purchase():
+        body    = request.get_json(force=True) or {}
+        user_id = body.pop("__user_id", None)
+        return _resp(_api.add_purchase(json.dumps(body), user_id))
+
+    @app.route("/api/receive_purchase/<pid>", methods=["POST"])
+    def receive_purchase(pid):
+        body    = request.get_json(force=True) or {}
+        user_id = body.pop("__user_id", None)
+        return _resp(_api.receive_purchase(pid, json.dumps(body), user_id))
+
+    @app.route("/api/cancel_purchase/<pid>", methods=["POST"])
+    def cancel_purchase(pid):
+        body    = request.get_json(force=True) or {}
+        user_id = body.get("__user_id")
+        return _resp(_api.cancel_purchase(pid, user_id))
+
+    # ── ACCOUNTS ──────────────────────────────────────────────
+    @app.route("/api/get_accounts")
+    def get_accounts():
+        return _resp(_api.get_accounts())
+
+    @app.route("/api/add_account", methods=["POST"])
+    def add_account():
+        body    = request.get_json(force=True) or {}
+        user_id = body.pop("__user_id", None)
+        return _resp(_api.add_account(json.dumps(body), user_id))
+
+    @app.route("/api/update_account/<aid>", methods=["POST"])
+    def update_account(aid):
+        body    = request.get_json(force=True) or {}
+        user_id = body.pop("__user_id", None)
+        return _resp(_api.update_account(aid, json.dumps(body), user_id))
+
+    @app.route("/api/delete_account/<aid>", methods=["POST"])
+    def delete_account(aid):
+        body    = request.get_json(force=True) or {}
+        user_id = body.get("__user_id")
+        return _resp(_api.delete_account(aid, user_id))
+
+    @app.route("/api/get_transactions")
+    def get_transactions():
+        account_id = request.args.get("account_id")
+        limit  = int(request.args.get("limit",  100))
+        offset = int(request.args.get("offset", 0))
+        return _resp(_api.get_transactions(account_id, limit, offset))
+
+    @app.route("/api/add_transaction", methods=["POST"])
+    def add_transaction():
+        body    = request.get_json(force=True) or {}
+        user_id = body.pop("__user_id", None)
+        return _resp(_api.add_transaction(json.dumps(body), user_id))
+
+    @app.route("/api/get_financial_summary")
+    def get_financial_summary():
+        return _resp(_api.get_financial_summary())
+
+    # ── CASH SESSIONS ─────────────────────────────────────────
+    @app.route("/api/get_active_session")
+    def get_active_session():
+        return _resp(_api.get_active_session())
+
+    @app.route("/api/open_session", methods=["POST"])
+    def open_session():
+        body    = request.get_json(force=True) or {}
+        user_id = body.pop("__user_id", None)
+        return _resp(_api.open_session(json.dumps(body), user_id))
+
+    @app.route("/api/close_session/<sid>", methods=["POST"])
+    def close_session(sid):
+        body    = request.get_json(force=True) or {}
+        user_id = body.pop("__user_id", None)
+        return _resp(_api.close_session(sid, json.dumps(body), user_id))
+
+    @app.route("/api/get_sessions")
+    def get_sessions():
+        return _resp(_api.get_sessions())
+
+    # ── HR & PAYROLL ───────────────────────────────────────────
+    @app.route("/api/get_employees")
+    def get_employees():
+        return _resp(_api.get_employees())
+
+    @app.route("/api/add_employee", methods=["POST"])
+    def add_employee():
+        body    = request.get_json(force=True) or {}
+        user_id = body.pop("__user_id", None)
+        return _resp(_api.add_employee(json.dumps(body), user_id))
+
+    @app.route("/api/update_employee/<eid>", methods=["POST"])
+    def update_employee(eid):
+        body    = request.get_json(force=True) or {}
+        user_id = body.pop("__user_id", None)
+        return _resp(_api.update_employee(eid, json.dumps(body), user_id))
+
+    @app.route("/api/delete_employee/<eid>", methods=["POST"])
+    def delete_employee(eid):
+        body    = request.get_json(force=True) or {}
+        user_id = body.get("__user_id")
+        return _resp(_api.delete_employee(eid, user_id))
+
+    @app.route("/api/get_payroll")
+    def get_payroll():
+        employee_id = request.args.get("employee_id")
+        return _resp(_api.get_payroll(employee_id))
+
+    @app.route("/api/add_payroll", methods=["POST"])
+    def add_payroll():
+        body    = request.get_json(force=True) or {}
+        user_id = body.pop("__user_id", None)
+        return _resp(_api.add_payroll(json.dumps(body), user_id))
+
+    @app.route("/api/get_employee_performance")
+    def get_employee_performance():
+        employee_id = request.args.get("employee_id")
+        return _resp(_api.get_employee_performance(employee_id))

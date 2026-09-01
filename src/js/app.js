@@ -50,8 +50,12 @@ const App = (() => {
     medicines: { module: MedicinesPage,  label: 'الأدوية والمخزون' },
     sales:     { module: SalesPage,      label: 'نقطة البيع' },
     invoices:  { module: InvoicesPage,   label: 'الفواتير' },
+    purchases: { module: PurchasesPage,  label: 'أوامر الشراء' },
+    shortage:  { module: ShortagePage,   label: 'كشكول النواقص' },
+    accounts:  { module: AccountsPage,   label: 'الحسابات المالية' },
     patients:  { module: PatientsPage,   label: 'المرضى' },
     suppliers: { module: SuppliersPage,  label: 'الموردون' },
+    hr:        { module: HRPage,         label: 'الموارد البشرية' },
     reports:   { module: ReportsPage,    label: 'التقارير' },
     settings:  { module: SettingsPage,   label: 'الإعدادات' },
   };
@@ -460,6 +464,18 @@ const App = (() => {
 
       const badge = document.getElementById('badgeLow');
       if (badge) { badge.textContent=total>0?total:''; badge.style.display=total>0?'':'none'; }
+
+      // badge كشكول النواقص
+      const badgeShortage = document.getElementById('badgeShortage');
+      if (badgeShortage) { badgeShortage.textContent=low.length>0?low.length:''; badgeShortage.style.display=low.length>0?'':'none'; }
+
+      // badge أوامر الشراء المفتوحة
+      try {
+        const purchases = await DB.getPurchases();
+        const openPO = (purchases||[]).filter(p=>p.status==='مفتوح').length;
+        const badgePO = document.getElementById('badgePO');
+        if (badgePO) { badgePO.textContent=openPO>0?openPO:''; badgePO.style.display=openPO>0?'':'none'; }
+      } catch(_) { /* ignore if no purchases table yet */ }
 
       const nb = document.getElementById('notifBadge');
       if (nb) { nb.textContent=total; nb.classList.toggle('hidden',total===0); }

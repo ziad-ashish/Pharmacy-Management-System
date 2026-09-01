@@ -163,6 +163,98 @@ def init_db():
         is_active     INTEGER DEFAULT 1
     );
 
+    CREATE TABLE IF NOT EXISTS purchases (
+        id             TEXT PRIMARY KEY,
+        po_num         TEXT UNIQUE,
+        supplier_id    TEXT,
+        supplier_name  TEXT,
+        status         TEXT DEFAULT 'مفتوح',
+        total_cost     REAL DEFAULT 0,
+        notes          TEXT,
+        created_by     TEXT,
+        created_at     TEXT,
+        received_at    TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS purchase_items (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        purchase_id TEXT NOT NULL REFERENCES purchases(id) ON DELETE CASCADE,
+        med_id      TEXT,
+        med_name    TEXT,
+        qty_ordered INTEGER DEFAULT 0,
+        qty_received INTEGER DEFAULT 0,
+        unit_cost   REAL DEFAULT 0,
+        total_cost  REAL DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS accounts (
+        id          TEXT PRIMARY KEY,
+        name        TEXT NOT NULL,
+        type        TEXT NOT NULL,
+        balance     REAL DEFAULT 0,
+        notes       TEXT,
+        is_active   INTEGER DEFAULT 1,
+        created_at  TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS transactions (
+        id          TEXT PRIMARY KEY,
+        account_id  TEXT NOT NULL REFERENCES accounts(id),
+        type        TEXT NOT NULL,
+        amount      REAL NOT NULL,
+        description TEXT,
+        ref_type    TEXT,
+        ref_id      TEXT,
+        created_by  TEXT,
+        created_at  TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS cash_sessions (
+        id           TEXT PRIMARY KEY,
+        opened_by    TEXT,
+        opened_at    TEXT,
+        closed_by    TEXT,
+        closed_at    TEXT,
+        opening_cash REAL DEFAULT 0,
+        closing_cash REAL DEFAULT 0,
+        expected_cash REAL DEFAULT 0,
+        difference   REAL DEFAULT 0,
+        sales_total  REAL DEFAULT 0,
+        status       TEXT DEFAULT 'مفتوحة'
+    );
+
+    CREATE TABLE IF NOT EXISTS employees (
+        id           TEXT PRIMARY KEY,
+        full_name    TEXT NOT NULL,
+        role         TEXT,
+        phone        TEXT,
+        national_id  TEXT,
+        hire_date    TEXT,
+        salary       REAL DEFAULT 0,
+        hourly_rate  REAL DEFAULT 0,
+        is_active    INTEGER DEFAULT 1,
+        notes        TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS payroll (
+        id           TEXT PRIMARY KEY,
+        employee_id  TEXT NOT NULL REFERENCES employees(id),
+        period       TEXT NOT NULL,
+        base_salary  REAL DEFAULT 0,
+        bonus        REAL DEFAULT 0,
+        deductions   REAL DEFAULT 0,
+        net_pay      REAL DEFAULT 0,
+        paid_at      TEXT,
+        paid_by      TEXT,
+        notes        TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_purchases_supplier  ON purchases(supplier_id);
+    CREATE INDEX IF NOT EXISTS idx_purchase_items_po   ON purchase_items(purchase_id);
+    CREATE INDEX IF NOT EXISTS idx_transactions_acc    ON transactions(account_id);
+    CREATE INDEX IF NOT EXISTS idx_transactions_date   ON transactions(created_at);
+    CREATE INDEX IF NOT EXISTS idx_payroll_emp         ON payroll(employee_id);
+
     CREATE TABLE IF NOT EXISTS sales (
         id             TEXT PRIMARY KEY,
         invoice_num    TEXT UNIQUE,
@@ -248,7 +340,6 @@ def init_db():
     _add_col("medicines", "image_data",        "TEXT")   # صورة المنتج (base64)
     _add_col("patients",  "is_active",    "INTEGER DEFAULT 1")
     _add_col("suppliers", "is_active",    "INTEGER DEFAULT 1")
-
     # back-fill invoice_seq / invoice_year
     needs_fill = con.execute(
         "SELECT COUNT(*) FROM sales WHERE invoice_seq=0 AND invoice_num IS NOT NULL"
@@ -365,6 +456,31 @@ def seed_if_empty():
             ("SL006","M010","إيبوبروفين 400mg",2,22,44),
         ]
     )
+
+    # ── seed حسابات افتراضية ──
+    if con.execute("SELECT COUNT(*) FROM accounts").fetchone()[0] == 0:
+        today = date.today().isoformat()
+        accounts_seed = [
+            (_new_id("AC"), "الصندوق الرئيسي",     "نقدي",     0.0, "الصندوق الرئيسي للصيدلية",        1, today),
+            (_new_id("AC"), "البنك",                "بنكي",     0.0, "الحساب البنكي",                  1, today),
+            (_new_id("AC"), "مصروفات التشغيل",      "مصروف",    0.0, "مصروفات الصيدلية اليومية",        1, today),
+            (_new_id("AC"), "إيجار الصيدلية",       "مصروف",    0.0, "إيجار شهري",                     1, today),
+            (_new_id("AC"), "رواتب الموظفين",       "مصروف",    0.0, "رواتب وأجور",                    1, today),
+        ]
+        con.executemany(
+            "INSERT INTO accounts(id,name,type,balance,notes,is_active,created_at) VALUES(?,?,?,?,?,?,?)",
+            accounts_seed
+        )
+
+    # ── seed موظف افتراضي ──
+    if con.execute("SELECT COUNT(*) FROM employees").fetchone()[0] == 0:
+        today = date.today().isoformat()
+        con.execute(
+            "INSERT INTO employees(id,full_name,role,phone,national_id,hire_date,salary,hourly_rate,is_active,notes)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?)",
+            (_new_id("EMP"), "د. أحمد محمد", "صيدلاني مسؤول", "0500000001", "1234567890", today, 5000.0, 30.0, 1, "")
+        )
+
     con.commit()
     con.close()
 
@@ -1158,3 +1274,468 @@ class PharmacyAPI:
             _audit(con, caller_id, "RESET_PASSWORD", "user", uid, "")
             con.commit(); con.close(); return _ok()
         except Exception as e: return _err(str(e))
+
+    # ══════════════════════════════════════════════════════════════
+    #  PURCHASES  — نظام المشتريات
+    # ══════════════════════════════════════════════════════════════
+    def get_purchases(self):
+        con = _conn()
+        rows = _rows(con.execute(
+            "SELECT p.*, s.name AS supplier_name_ref "
+            "FROM purchases p LEFT JOIN suppliers s ON s.id=p.supplier_id "
+            "ORDER BY p.created_at DESC"))
+        for r in rows:
+            r["items"] = _rows(con.execute(
+                "SELECT * FROM purchase_items WHERE purchase_id=?", (r["id"],)))
+        con.close(); return _ok(rows)
+
+    def get_purchase(self, pid: str):
+        con = _conn()
+        row = con.execute("SELECT * FROM purchases WHERE id=?", (pid,)).fetchone()
+        if not row: con.close(); return _ok(None)
+        p = dict(row)
+        p["items"] = _rows(con.execute(
+            "SELECT * FROM purchase_items WHERE purchase_id=?", (pid,)))
+        con.close(); return _ok(p)
+
+    def add_purchase(self, data: str, user_id: str = None):
+        """إنشاء أمر شراء جديد (status=مفتوح)"""
+        try:
+            d = json.loads(data)
+            con = _conn()
+            nid = _new_id("PO")
+            year = datetime.now().year
+            seq = con.execute(
+                "SELECT COALESCE(MAX(CAST(SUBSTR(po_num,8) AS INTEGER)),0) FROM purchases"
+            ).fetchone()[0] + 1
+            po_num = f"PO-{year}-{seq:03d}"
+            now = datetime.now().isoformat()
+
+            supplier = con.execute("SELECT name FROM suppliers WHERE id=?",
+                                   (d.get("supplier_id"),)).fetchone()
+            sup_name = supplier["name"] if supplier else d.get("supplier_name","")
+
+            total_cost = sum(i.get("unit_cost",0)*i.get("qty_ordered",0) for i in d.get("items",[]))
+
+            con.execute(
+                "INSERT INTO purchases(id,po_num,supplier_id,supplier_name,status,total_cost,notes,created_by,created_at)"
+                " VALUES(?,?,?,?,?,?,?,?,?)",
+                (nid, po_num, d.get("supplier_id"), sup_name,
+                 "مفتوح", total_cost, d.get("notes",""), user_id, now)
+            )
+            for item in d.get("items",[]):
+                con.execute(
+                    "INSERT INTO purchase_items(purchase_id,med_id,med_name,qty_ordered,qty_received,unit_cost,total_cost)"
+                    " VALUES(?,?,?,?,?,?,?)",
+                    (nid, item.get("med_id"), item.get("med_name"),
+                     item.get("qty_ordered",0), 0,
+                     item.get("unit_cost",0),
+                     item.get("unit_cost",0)*item.get("qty_ordered",0))
+                )
+            # تحديث total_orders للمورد
+            con.execute(
+                "UPDATE suppliers SET total_orders=total_orders+1, last_order=? WHERE id=?",
+                (now[:10], d.get("supplier_id"))
+            )
+            _audit(con, user_id, "ADD", "purchase", nid, po_num)
+            con.commit(); con.close(); return _ok({"id": nid, "po_num": po_num})
+        except Exception as e: return _err(str(e))
+
+    def receive_purchase(self, pid: str, data: str, user_id: str = None):
+        """استلام بضاعة — يُحدّث المخزون وحالة أمر الشراء"""
+        try:
+            d = json.loads(data)
+            con = _conn()
+            po = con.execute("SELECT * FROM purchases WHERE id=?", (pid,)).fetchone()
+            if not po: con.close(); return _err("أمر الشراء غير موجود")
+            if po["status"] == "مستلم": con.close(); return _err("تم استلام هذا الأمر بالكامل مسبقاً")
+
+            items_received = d.get("items", [])
+            now = datetime.now().isoformat()
+
+            for item in items_received:
+                item_row = con.execute(
+                    "SELECT * FROM purchase_items WHERE id=?", (item["item_id"],)
+                ).fetchone()
+                if not item_row: continue
+                qty = int(item.get("qty_received", 0))
+                if qty <= 0: continue
+
+                con.execute(
+                    "UPDATE purchase_items SET qty_received=qty_received+? WHERE id=?",
+                    (qty, item["item_id"])
+                )
+                # تحديث المخزون
+                if item_row["med_id"]:
+                    con.execute(
+                        "UPDATE medicines SET stock=stock+? WHERE id=?",
+                        (qty, item_row["med_id"])
+                    )
+                    # تحديث سعر التكلفة لو مختلف
+                    new_cost = item.get("unit_cost")
+                    if new_cost:
+                        con.execute(
+                            "UPDATE medicines SET cost=? WHERE id=?",
+                            (new_cost, item_row["med_id"])
+                        )
+
+            # تحقق إذا كل الأصناف استُلمت
+            total_ordered  = con.execute(
+                "SELECT COALESCE(SUM(qty_ordered),0) FROM purchase_items WHERE purchase_id=?", (pid,)
+            ).fetchone()[0]
+            total_received = con.execute(
+                "SELECT COALESCE(SUM(qty_received),0) FROM purchase_items WHERE purchase_id=?", (pid,)
+            ).fetchone()[0]
+            new_status = "مستلم" if total_received >= total_ordered else "مستلم جزئياً"
+
+            con.execute(
+                "UPDATE purchases SET status=?, received_at=? WHERE id=?",
+                (new_status, now, pid)
+            )
+            _audit(con, user_id, "RECEIVE", "purchase", pid,
+                   f"{po['po_num']} — {new_status}")
+            con.commit(); con.close()
+            return _ok({"status": new_status})
+        except Exception as e: return _err(str(e))
+
+    def cancel_purchase(self, pid: str, user_id: str = None):
+        try:
+            con = _conn()
+            po = con.execute("SELECT po_num,status FROM purchases WHERE id=?", (pid,)).fetchone()
+            if not po: con.close(); return _err("أمر الشراء غير موجود")
+            if po["status"] in ("مستلم",):
+                con.close(); return _err("لا يمكن إلغاء أمر مستلم بالكامل")
+            con.execute("UPDATE purchases SET status='ملغي' WHERE id=?", (pid,))
+            _audit(con, user_id, "CANCEL", "purchase", pid, po["po_num"])
+            con.commit(); con.close(); return _ok()
+        except Exception as e: return _err(str(e))
+
+    # ══════════════════════════════════════════════════════════════
+    #  ACCOUNTS  — نظام الحسابات
+    # ══════════════════════════════════════════════════════════════
+    def get_accounts(self):
+        con = _conn()
+        rows = _rows(con.execute(
+            "SELECT * FROM accounts WHERE is_active=1 ORDER BY type, name"))
+        con.close(); return _ok(rows)
+
+    def add_account(self, data: str, user_id: str = None):
+        try:
+            d = json.loads(data)
+            con = _conn()
+            nid = _new_id("AC")
+            con.execute(
+                "INSERT INTO accounts(id,name,type,balance,notes,is_active,created_at)"
+                " VALUES(?,?,?,?,?,1,?)",
+                (nid, d.get("name"), d.get("type"), d.get("balance",0),
+                 d.get("notes",""), date.today().isoformat())
+            )
+            _audit(con, user_id, "ADD", "account", nid, d.get("name",""))
+            con.commit(); con.close(); return _ok(nid)
+        except Exception as e: return _err(str(e))
+
+    def update_account(self, aid: str, data: str, user_id: str = None):
+        try:
+            d = json.loads(data)
+            con = _conn()
+            con.execute(
+                "UPDATE accounts SET name=?,type=?,notes=? WHERE id=?",
+                (d.get("name"), d.get("type"), d.get("notes",""), aid)
+            )
+            _audit(con, user_id, "UPDATE", "account", aid, d.get("name",""))
+            con.commit(); con.close(); return _ok()
+        except Exception as e: return _err(str(e))
+
+    def delete_account(self, aid: str, user_id: str = None):
+        try:
+            con = _conn()
+            linked = con.execute(
+                "SELECT COUNT(*) FROM transactions WHERE account_id=?", (aid,)
+            ).fetchone()[0]
+            if linked:
+                con.execute("UPDATE accounts SET is_active=0 WHERE id=?", (aid,))
+            else:
+                con.execute("DELETE FROM accounts WHERE id=?", (aid,))
+            _audit(con, user_id, "DELETE", "account", aid, "")
+            con.commit(); con.close(); return _ok()
+        except Exception as e: return _err(str(e))
+
+    def get_transactions(self, account_id: str = None, limit: int = 100, offset: int = 0):
+        con = _conn()
+        if account_id:
+            rows = _rows(con.execute(
+                "SELECT t.*, a.name AS account_name FROM transactions t "
+                "LEFT JOIN accounts a ON a.id=t.account_id "
+                "WHERE t.account_id=? ORDER BY t.created_at DESC LIMIT ? OFFSET ?",
+                (account_id, limit, offset)))
+            total = con.execute(
+                "SELECT COUNT(*) FROM transactions WHERE account_id=?", (account_id,)
+            ).fetchone()[0]
+        else:
+            rows = _rows(con.execute(
+                "SELECT t.*, a.name AS account_name FROM transactions t "
+                "LEFT JOIN accounts a ON a.id=t.account_id "
+                "ORDER BY t.created_at DESC LIMIT ? OFFSET ?",
+                (limit, offset)))
+            total = con.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
+        con.close(); return _ok({"items": rows, "total": total})
+
+    def add_transaction(self, data: str, user_id: str = None):
+        try:
+            d = json.loads(data)
+            con = _conn()
+            nid = _new_id("TR")
+            amount = float(d.get("amount", 0))
+            tx_type = d.get("type")  # دخل / مصروف / تحويل
+            now = datetime.now().isoformat()
+
+            con.execute(
+                "INSERT INTO transactions(id,account_id,type,amount,description,ref_type,ref_id,created_by,created_at)"
+                " VALUES(?,?,?,?,?,?,?,?,?)",
+                (nid, d.get("account_id"), tx_type, amount,
+                 d.get("description",""), d.get("ref_type"),
+                 d.get("ref_id"), user_id, now)
+            )
+            # تحديث رصيد الحساب
+            delta = amount if tx_type == "دخل" else -amount
+            con.execute(
+                "UPDATE accounts SET balance=balance+? WHERE id=?",
+                (delta, d.get("account_id"))
+            )
+            _audit(con, user_id, "ADD", "transaction", nid, d.get("description",""))
+            con.commit(); con.close(); return _ok(nid)
+        except Exception as e: return _err(str(e))
+
+    def get_financial_summary(self):
+        con = _conn()
+        today = date.today().isoformat()
+        month = today[:7]
+
+        accounts = _rows(con.execute("SELECT * FROM accounts WHERE is_active=1"))
+        total_income = con.execute(
+            "SELECT COALESCE(SUM(amount),0) FROM transactions WHERE type='دخل'"
+        ).fetchone()[0]
+        total_expense = con.execute(
+            "SELECT COALESCE(SUM(amount),0) FROM transactions WHERE type='مصروف'"
+        ).fetchone()[0]
+        month_income = con.execute(
+            "SELECT COALESCE(SUM(amount),0) FROM transactions WHERE type='دخل' AND created_at LIKE ?",
+            (month+'%',)
+        ).fetchone()[0]
+        month_expense = con.execute(
+            "SELECT COALESCE(SUM(amount),0) FROM transactions WHERE type='مصروف' AND created_at LIKE ?",
+            (month+'%',)
+        ).fetchone()[0]
+        today_income = con.execute(
+            "SELECT COALESCE(SUM(amount),0) FROM transactions WHERE type='دخل' AND created_at LIKE ?",
+            (today+'%',)
+        ).fetchone()[0]
+        today_expense = con.execute(
+            "SELECT COALESCE(SUM(amount),0) FROM transactions WHERE type='مصروف' AND created_at LIKE ?",
+            (today+'%',)
+        ).fetchone()[0]
+        con.close()
+        return _ok({
+            "accounts": accounts,
+            "total_income": round(total_income, 2),
+            "total_expense": round(total_expense, 2),
+            "net": round(total_income - total_expense, 2),
+            "month_income": round(month_income, 2),
+            "month_expense": round(month_expense, 2),
+            "month_net": round(month_income - month_expense, 2),
+            "today_income": round(today_income, 2),
+            "today_expense": round(today_expense, 2),
+        })
+
+    # ══════════════════════════════════════════════════════════════
+    #  CASH SESSIONS  — تسوية نهاية اليوم
+    # ══════════════════════════════════════════════════════════════
+    def get_active_session(self):
+        con = _conn()
+        row = con.execute(
+            "SELECT * FROM cash_sessions WHERE status='مفتوحة' ORDER BY opened_at DESC LIMIT 1"
+        ).fetchone()
+        con.close(); return _ok(dict(row) if row else None)
+
+    def open_session(self, data: str, user_id: str = None):
+        try:
+            d = json.loads(data)
+            con = _conn()
+            # لا يُسمح بجلستين مفتوحتين
+            existing = con.execute(
+                "SELECT id FROM cash_sessions WHERE status='مفتوحة'"
+            ).fetchone()
+            if existing:
+                con.close(); return _err("توجد جلسة مفتوحة بالفعل. أغلق الجلسة الحالية أولاً.")
+            nid = _new_id("CS")
+            now = datetime.now().isoformat()
+            con.execute(
+                "INSERT INTO cash_sessions(id,opened_by,opened_at,opening_cash,status)"
+                " VALUES(?,?,?,?,?)",
+                (nid, user_id, now, d.get("opening_cash",0), "مفتوحة")
+            )
+            _audit(con, user_id, "OPEN_SESSION", "cash_session", nid, "")
+            con.commit(); con.close(); return _ok(nid)
+        except Exception as e: return _err(str(e))
+
+    def close_session(self, sid: str, data: str, user_id: str = None):
+        try:
+            d = json.loads(data)
+            con = _conn()
+            session = con.execute(
+                "SELECT * FROM cash_sessions WHERE id=?", (sid,)
+            ).fetchone()
+            if not session: con.close(); return _err("الجلسة غير موجودة")
+            if session["status"] != "مفتوحة":
+                con.close(); return _err("الجلسة مغلقة بالفعل")
+
+            # حساب مبيعات النقد خلال الجلسة
+            sales_total = con.execute(
+                "SELECT COALESCE(SUM(total),0) FROM sales "
+                "WHERE status='مكتمل' AND payment_method='نقدي' "
+                "AND sale_date=?",
+                (date.today().isoformat(),)
+            ).fetchone()[0]
+
+            opening = session["opening_cash"] or 0
+            closing = float(d.get("closing_cash", 0))
+            expected = opening + sales_total
+            diff = closing - expected
+            now = datetime.now().isoformat()
+
+            con.execute(
+                "UPDATE cash_sessions SET closed_by=?,closed_at=?,closing_cash=?,"
+                "expected_cash=?,difference=?,sales_total=?,status='مغلقة' WHERE id=?",
+                (user_id, now, closing, expected, diff, sales_total, sid)
+            )
+            _audit(con, user_id, "CLOSE_SESSION", "cash_session", sid,
+                   f"فرق={diff:.2f}")
+            con.commit(); con.close()
+            return _ok({
+                "sales_total": round(sales_total, 2),
+                "expected": round(expected, 2),
+                "closing": round(closing, 2),
+                "difference": round(diff, 2),
+            })
+        except Exception as e: return _err(str(e))
+
+    def get_sessions(self):
+        con = _conn()
+        rows = _rows(con.execute(
+            "SELECT * FROM cash_sessions ORDER BY opened_at DESC LIMIT 30"))
+        con.close(); return _ok(rows)
+
+    # ══════════════════════════════════════════════════════════════
+    #  HR & PAYROLL  — الموظفون والأجور
+    # ══════════════════════════════════════════════════════════════
+    def get_employees(self):
+        con = _conn()
+        rows = _rows(con.execute(
+            "SELECT * FROM employees WHERE is_active=1 ORDER BY full_name"))
+        con.close(); return _ok(rows)
+
+    def add_employee(self, data: str, user_id: str = None):
+        try:
+            d = json.loads(data)
+            con = _conn()
+            nid = _new_id("EMP")
+            con.execute(
+                "INSERT INTO employees(id,full_name,role,phone,national_id,hire_date,salary,hourly_rate,is_active,notes)"
+                " VALUES(?,?,?,?,?,?,?,?,1,?)",
+                (nid, d.get("full_name"), d.get("role"), d.get("phone"),
+                 d.get("national_id"), d.get("hire_date"),
+                 d.get("salary",0), d.get("hourly_rate",0),
+                 d.get("notes",""))
+            )
+            _audit(con, user_id, "ADD", "employee", nid, d.get("full_name",""))
+            con.commit(); con.close(); return _ok(nid)
+        except Exception as e: return _err(str(e))
+
+    def update_employee(self, eid: str, data: str, user_id: str = None):
+        try:
+            d = json.loads(data)
+            con = _conn()
+            con.execute(
+                "UPDATE employees SET full_name=?,role=?,phone=?,national_id=?,"
+                "hire_date=?,salary=?,hourly_rate=?,notes=? WHERE id=?",
+                (d.get("full_name"), d.get("role"), d.get("phone"),
+                 d.get("national_id"), d.get("hire_date"),
+                 d.get("salary",0), d.get("hourly_rate",0),
+                 d.get("notes",""), eid)
+            )
+            _audit(con, user_id, "UPDATE", "employee", eid, d.get("full_name",""))
+            con.commit(); con.close(); return _ok()
+        except Exception as e: return _err(str(e))
+
+    def delete_employee(self, eid: str, user_id: str = None):
+        try:
+            con = _conn()
+            row = con.execute("SELECT full_name FROM employees WHERE id=?", (eid,)).fetchone()
+            if not row: con.close(); return _err("الموظف غير موجود")
+            con.execute("UPDATE employees SET is_active=0 WHERE id=?", (eid,))
+            _audit(con, user_id, "DELETE", "employee", eid, row["full_name"])
+            con.commit(); con.close(); return _ok()
+        except Exception as e: return _err(str(e))
+
+    def get_payroll(self, employee_id: str = None):
+        con = _conn()
+        if employee_id:
+            rows = _rows(con.execute(
+                "SELECT p.*, e.full_name FROM payroll p "
+                "LEFT JOIN employees e ON e.id=p.employee_id "
+                "WHERE p.employee_id=? ORDER BY p.period DESC", (employee_id,)))
+        else:
+            rows = _rows(con.execute(
+                "SELECT p.*, e.full_name FROM payroll p "
+                "LEFT JOIN employees e ON e.id=p.employee_id "
+                "ORDER BY p.period DESC LIMIT 60"))
+        con.close(); return _ok(rows)
+
+    def add_payroll(self, data: str, user_id: str = None):
+        try:
+            d = json.loads(data)
+            con = _conn()
+            emp = con.execute(
+                "SELECT * FROM employees WHERE id=?", (d.get("employee_id"),)
+            ).fetchone()
+            if not emp: con.close(); return _err("الموظف غير موجود")
+            nid = _new_id("PR")
+            base  = float(d.get("base_salary", emp["salary"] or 0))
+            bonus = float(d.get("bonus", 0))
+            deductions = float(d.get("deductions", 0))
+            net = base + bonus - deductions
+            now = datetime.now().isoformat()
+            con.execute(
+                "INSERT INTO payroll(id,employee_id,period,base_salary,bonus,deductions,net_pay,paid_at,paid_by,notes)"
+                " VALUES(?,?,?,?,?,?,?,?,?,?)",
+                (nid, d.get("employee_id"), d.get("period"),
+                 base, bonus, deductions, net,
+                 now, user_id, d.get("notes",""))
+            )
+            _audit(con, user_id, "ADD", "payroll", nid,
+                   f"{emp['full_name']} — {d.get('period')} — {net:.2f}")
+            con.commit(); con.close(); return _ok(nid)
+        except Exception as e: return _err(str(e))
+
+    def get_employee_performance(self, employee_id: str = None):
+        """تقرير أداء الموظفين: مبيعات كل كاشير"""
+        con = _conn()
+        if employee_id:
+            emp = con.execute(
+                "SELECT full_name FROM employees WHERE id=?", (employee_id,)
+            ).fetchone()
+            cashier_name = emp["full_name"] if emp else None
+            if cashier_name:
+                rows = _rows(con.execute(
+                    "SELECT sale_date, COUNT(*) AS count, SUM(total) AS revenue "
+                    "FROM sales WHERE status='مكتمل' AND cashier=? "
+                    "GROUP BY sale_date ORDER BY sale_date DESC LIMIT 30",
+                    (cashier_name,)))
+            else:
+                rows = []
+        else:
+            rows = _rows(con.execute(
+                "SELECT cashier, COUNT(*) AS count, SUM(total) AS revenue "
+                "FROM sales WHERE status='مكتمل' AND cashier IS NOT NULL AND cashier != '' "
+                "GROUP BY cashier ORDER BY revenue DESC"))
+        con.close(); return _ok(rows)

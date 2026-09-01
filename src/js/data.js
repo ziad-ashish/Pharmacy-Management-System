@@ -505,4 +505,45 @@ const DB = {
 
   /* ── no-op seed (Python handles it) ────────────────── */
   seed() {},
+
+  /* ── PURCHASES ──────────────────────────────────────── */
+  async getPurchases()          { return _IS_FLASK ? _api('get_purchases') : []; },
+  async getPurchase(id)         { return _IS_FLASK ? _api(`get_purchase/${id}`) : null; },
+  async addPurchase(data)       { return _IS_FLASK ? _api('add_purchase', {body: this._withUser({...data})}) : {}; },
+  async receivePurchase(id, d)  { return _IS_FLASK ? _api(`receive_purchase/${id}`, {body: this._withUser({...d})}) : {}; },
+  async cancelPurchase(id)      { return _IS_FLASK ? _api(`cancel_purchase/${id}`, {body: this._withUser({})}) : {}; },
+
+  /* ── ACCOUNTS ───────────────────────────────────────── */
+  async getAccounts()           { return _IS_FLASK ? _api('get_accounts') : []; },
+  async addAccount(data)        { return _IS_FLASK ? _api('add_account', {body: this._withUser({...data})}) : {}; },
+  async updateAccount(id, data) { return _IS_FLASK ? _api(`update_account/${id}`, {body: this._withUser({...data})}) : {}; },
+  async deleteAccount(id)       { return _IS_FLASK ? _api(`delete_account/${id}`, {body: this._withUser({})}) : {}; },
+  async getTransactions(accountId, limit=100, offset=0) {
+    const params = { limit, offset };
+    if (accountId) params.account_id = accountId;
+    return _IS_FLASK ? _api('get_transactions', {params}) : {items:[],total:0};
+  },
+  async addTransaction(data)    { return _IS_FLASK ? _api('add_transaction', {body: this._withUser({...data})}) : {}; },
+  async getFinancialSummary()   { return _IS_FLASK ? _api('get_financial_summary') : {accounts:[],total_income:0,total_expense:0,net:0,month_income:0,month_expense:0,month_net:0,today_income:0,today_expense:0}; },
+
+  /* ── CASH SESSIONS ──────────────────────────────────── */
+  async getActiveSession()      { return _IS_FLASK ? _api('get_active_session') : null; },
+  async openSession(data)       { return _IS_FLASK ? _api('open_session', {body: this._withUser({...data})}) : {}; },
+  async closeSession(id, data)  { return _IS_FLASK ? _api(`close_session/${id}`, {body: this._withUser({...data})}) : {}; },
+  async getSessions()           { return _IS_FLASK ? _api('get_sessions') : []; },
+
+  /* ── HR & PAYROLL ───────────────────────────────────── */
+  async getEmployees()          { return _IS_FLASK ? _api('get_employees') : []; },
+  async addEmployee(data)       { return _IS_FLASK ? _api('add_employee', {body: this._withUser({...data})}) : {}; },
+  async updateEmployee(id, d)   { return _IS_FLASK ? _api(`update_employee/${id}`, {body: this._withUser({...d})}) : {}; },
+  async deleteEmployee(id)      { return _IS_FLASK ? _api(`delete_employee/${id}`, {body: this._withUser({})}) : {}; },
+  async getPayroll(empId)       {
+    const params = empId ? {employee_id: empId} : {};
+    return _IS_FLASK ? _api('get_payroll', {params}) : [];
+  },
+  async addPayroll(data)        { return _IS_FLASK ? _api('add_payroll', {body: this._withUser({...data})}) : {}; },
+  async getEmployeePerformance(empId) {
+    const params = empId ? {employee_id: empId} : {};
+    return _IS_FLASK ? _api('get_employee_performance', {params}) : [];
+  },
 };
