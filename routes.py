@@ -143,6 +143,13 @@ def register_routes(app):
     def get_stats():
         return _resp(_api.get_stats())
 
+    @app.route("/api/get_dashboard_report")
+    def get_dashboard_report():
+        return _resp(_api.get_dashboard_report(
+            request.args.get("from_date"),
+            request.args.get("to_date"),
+        ))
+
     @app.route("/api/get_monthly_sales")
     def get_monthly_sales():
         return _resp(_api.get_monthly_sales())

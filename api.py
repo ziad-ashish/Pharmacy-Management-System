@@ -928,6 +928,107 @@ class PharmacyAPI:
             "totalRevenue": total_revenue,
         })
 
+    def get_dashboard_report(self, from_date: str = None, to_date: str = None):
+        """Operational sales summary for an explicit inclusive date range."""
+        try:
+            today = date.today()
+            start = date.fromisoformat(from_date) if from_date else today.replace(day=1)
+            end = date.fromisoformat(to_date) if to_date else today
+        except (TypeError, ValueError):
+            return _err("صيغة التاريخ غير صحيحة")
+
+        if start > end:
+            return _err("تاريخ البداية يجب أن يسبق تاريخ النهاية")
+        if (end - start).days > 730:
+            return _err("الحد الأقصى للفترة هو سنتان")
+
+        start_s, end_s = start.isoformat(), end.isoformat()
+        con = _conn()
+        try:
+            summary = con.execute(
+                "SELECT COUNT(*) AS count, COALESCE(SUM(total),0) AS revenue, "
+                "COALESCE(AVG(total),0) AS average, COALESCE(SUM(discount),0) AS discount, "
+                "COALESCE(SUM(tax),0) AS tax "
+                "FROM sales WHERE status='مكتمل' AND sale_date BETWEEN ? AND ?",
+                (start_s, end_s),
+            ).fetchone()
+
+            cost = con.execute(
+                "SELECT COALESCE(SUM(si.qty * COALESCE(m.cost,0)),0) "
+                "FROM sale_items si JOIN sales s ON s.id=si.sale_id "
+                "LEFT JOIN medicines m ON m.id=si.med_id "
+                "WHERE s.status='مكتمل' AND s.sale_date BETWEEN ? AND ?",
+                (start_s, end_s),
+            ).fetchone()[0]
+
+            span_days = (end - start).days + 1
+            bucket_sql = "s.sale_date" if span_days <= 62 else "substr(s.sale_date,1,7)"
+            series_rows = con.execute(
+                f"SELECT {bucket_sql} AS bucket, COALESCE(SUM(s.total),0) AS revenue "
+                "FROM sales s WHERE s.status='مكتمل' AND s.sale_date BETWEEN ? AND ? "
+                "GROUP BY bucket ORDER BY bucket",
+                (start_s, end_s),
+            ).fetchall()
+
+            top = _rows(con.execute(
+                "SELECT si.name, SUM(si.qty) AS qty, SUM(si.total) AS revenue "
+                "FROM sale_items si JOIN sales s ON s.id=si.sale_id "
+                "WHERE s.status='مكتمل' AND s.sale_date BETWEEN ? AND ? "
+                "GROUP BY si.name ORDER BY qty DESC, revenue DESC LIMIT 5",
+                (start_s, end_s),
+            ))
+
+            recent = _rows(con.execute(
+                "SELECT invoice_num, patient_name, total, sale_date, sale_time, payment_method "
+                "FROM sales WHERE status='مكتمل' AND sale_date BETWEEN ? AND ? "
+                "ORDER BY sale_date DESC, sale_time DESC LIMIT 6",
+                (start_s, end_s),
+            ))
+
+            payments = _rows(con.execute(
+                "SELECT payment_method AS method, COUNT(*) AS count, COALESCE(SUM(total),0) AS total "
+                "FROM sales WHERE status='مكتمل' AND sale_date BETWEEN ? AND ? "
+                "GROUP BY payment_method ORDER BY total DESC",
+                (start_s, end_s),
+            ))
+
+            previous_end = start - timedelta(days=1)
+            previous_start = previous_end - timedelta(days=span_days - 1)
+            previous_revenue = con.execute(
+                "SELECT COALESCE(SUM(total),0) FROM sales "
+                "WHERE status='مكتمل' AND sale_date BETWEEN ? AND ?",
+                (previous_start.isoformat(), previous_end.isoformat()),
+            ).fetchone()[0]
+
+            revenue = float(summary["revenue"] or 0)
+            growth = None if not previous_revenue else round(
+                ((revenue - previous_revenue) / previous_revenue) * 100, 1
+            )
+            return _ok({
+                "from": start_s,
+                "to": end_s,
+                "summary": {
+                    "count": int(summary["count"] or 0),
+                    "revenue": round(revenue, 2),
+                    "average": round(float(summary["average"] or 0), 2),
+                    "discount": round(float(summary["discount"] or 0), 2),
+                    "tax": round(float(summary["tax"] or 0), 2),
+                    "estimatedCost": round(float(cost or 0), 2),
+                    "estimatedProfit": round(revenue - float(cost or 0), 2),
+                    "growthPct": growth,
+                },
+                "series": {
+                    "labels": [r["bucket"] for r in series_rows],
+                    "values": [round(float(r["revenue"] or 0), 2) for r in series_rows],
+                    "granularity": "day" if span_days <= 62 else "month",
+                },
+                "topMedicines": top,
+                "recentSales": recent,
+                "payments": payments,
+            })
+        finally:
+            con.close()
+
     def get_monthly_sales(self):
         con  = _conn()
         year = datetime.now().year

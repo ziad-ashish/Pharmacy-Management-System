@@ -220,6 +220,28 @@ const MedicinesPage = (() => {
   ════════════════════════════════════════════════════════ */
   let _savedImage = null;  // base64 صورة المنتج الحالية
 
+  function _generatePharmacyBarcode() {
+    const base = `29${Date.now().toString().slice(-9)}${Math.floor(Math.random() * 10)}`;
+    const weightedSum = [...base].reduce((sum, digit, index) =>
+      sum + Number(digit) * (index % 2 === 0 ? 1 : 3), 0);
+    return base + ((10 - (weightedSum % 10)) % 10);
+  }
+
+  function _ensurePharmacyBarcode(showNotice = false) {
+    const input = document.getElementById('fMedPharmacyBarcode');
+    let value = input?.value.trim();
+    if (value) return value;
+
+    value = _generatePharmacyBarcode();
+    if (input) input.value = value;
+    const preview = document.getElementById('previewPharmacyBarcode');
+    if (preview) preview.innerHTML = BarcodeGenerator.generateSVG(value, { height: 32, includeText: true });
+    if (showNotice) {
+      Toast.info('تم إنشاء باركود داخلي', 'تم توليد باركود الصيدلية تلقائيًا لاستخدامه في الملصقات');
+    }
+    return value;
+  }
+
   async function openAddModal() {
     _savedImage = null;
     const [categories, suppliers] = await Promise.all([DB.getCategories(), DB.getSuppliers()]);
@@ -310,18 +332,15 @@ const MedicinesPage = (() => {
       <section class="mf-section">
         <div class="mf-section-title">
           <span>02</span>
-          <div><strong>الباركود</strong><small>امسح أحد الباركودين لتعبئة البيانات تلقائياً</small></div>
+          <div><strong>الباركود</strong><small>باركود الشركة للتعرّف على العبوة، وباركود الصيدلية هو المخصص لطباعة الملصقات</small></div>
         </div>
         <div class="mf-grid cols-2">
           <label class="mf-field">
-            <span>باركود الشركة المصنّعة</span>
+            <span>باركود الشركة المصنّعة <em class="mf-bc-tag mf-bc-tag-neutral">موجود على العبوة — لا يُطبع</em></span>
             <div class="mf-barcode-wrap">
               <div class="mf-barcode-scan-icon"><i class="fas fa-barcode"></i></div>
               <input id="fMedCompanyBarcode" class="form-control" inputmode="numeric"
                      placeholder="امسح باركود الشركة هنا">
-              <button type="button" class="mf-bc-gen" id="genCompanyBarcode" title="توليد باركود جديد">
-                <i class="fas fa-wand-magic-sparkles"></i>
-              </button>
             </div>
             <div class="mf-barcode-preview" id="previewCompanyBarcode"></div>
           </label>
@@ -331,7 +350,7 @@ const MedicinesPage = (() => {
               <div class="mf-barcode-scan-icon mf-bc-pharmacy"><i class="fas fa-qrcode"></i></div>
               <input id="fMedPharmacyBarcode" class="form-control" inputmode="numeric"
                      placeholder="امسح باركود الصيدلية هنا">
-              <button type="button" class="mf-bc-gen mf-bc-gen-ph" id="genPharmacyBarcode" title="توليد باركود جديد">
+              <button type="button" class="mf-bc-gen mf-bc-gen-ph" id="genPharmacyBarcode" title="توليد باركود داخلي جديد للصيدلية">
                 <i class="fas fa-wand-magic-sparkles"></i>
               </button>
             </div>
@@ -423,12 +442,15 @@ const MedicinesPage = (() => {
       foot: `
         <div class="mf-foot-note"><i class="fas fa-circle-info"></i> يمكنك تعديل البيانات لاحقًا</div>
         <div class="mf-foot-actions">
-          <button class="btn btn-ghost" onclick="Modal.close()">إلغاء</button>
-          <button class="btn btn-outline-teal" id="printBarcodeBtn" title="طباعة باركود بعدد الكمية المُدخَلة">
-            <i class="fas fa-print"></i> طباعة باركود
+          <button type="button" class="btn btn-ghost" onclick="Modal.close()">إلغاء</button>
+          <button type="button" class="btn btn-outline-teal" id="saveMedBtn">
+            <i class="fas fa-check"></i> حفظ
           </button>
-          <button class="btn btn-primary" id="saveMedBtn">
-            <i class="fas fa-check"></i> حفظ الصنف
+          <button type="button" class="btn btn-outline-teal" id="printBarcodeBtn" title="طباعة باركود الصيدلية بعدد الكمية المُدخَلة">
+            <i class="fas fa-print"></i> طباعة
+          </button>
+          <button type="button" class="btn btn-primary" id="savePrintMedBtn">
+            <i class="fas fa-floppy-disk"></i> حفظ وطباعة
           </button>
         </div>`,
     });
@@ -504,9 +526,6 @@ const MedicinesPage = (() => {
     });
 
     /* ── توليد الباركود ──────────────────────────────── */
-    const genBC = () => '628' + Math.floor(1000000000 + Math.random() * 9000000000);
-    const genPhBC = () => 'PH' + Date.now().toString().slice(-8);
-
     const renderBCPreview = (inputId, previewId) => {
       const val = document.getElementById(inputId)?.value.trim();
       const el  = document.getElementById(previewId);
@@ -514,12 +533,8 @@ const MedicinesPage = (() => {
       el.innerHTML = val ? BarcodeGenerator.generateSVG(val, { height: 32, includeText: true }) : '';
     };
 
-    document.getElementById('genCompanyBarcode')?.addEventListener('click', () => {
-      document.getElementById('fMedCompanyBarcode').value = genBC();
-      renderBCPreview('fMedCompanyBarcode', 'previewCompanyBarcode');
-    });
     document.getElementById('genPharmacyBarcode')?.addEventListener('click', () => {
-      document.getElementById('fMedPharmacyBarcode').value = genPhBC();
+      document.getElementById('fMedPharmacyBarcode').value = _generatePharmacyBarcode();
       renderBCPreview('fMedPharmacyBarcode', 'previewPharmacyBarcode');
     });
 
@@ -612,13 +627,13 @@ const MedicinesPage = (() => {
 
     /* ── زر مسودة جديدة ─────────────────────────────── */
     document.getElementById('clearDraftBtn')?.addEventListener('click', () => {
-      Modal.confirm('تفريغ المسودة', 'هل تريد مسح جميع البيانات المُدخَلة والبدء من جديد؟', () => {
-        _clearAddForm();
-      });
+      _clearAddForm();
+      Toast.info('مسودة جديدة', 'تم تفريغ النموذج وأصبح جاهزًا لإدخال صنف جديد');
     });
 
     /* ── حفظ الصنف ───────────────────────────────────── */
     document.getElementById('saveMedBtn')?.addEventListener('click', () => saveMedicine(false));
+    document.getElementById('savePrintMedBtn')?.addEventListener('click', () => saveMedicine(true));
 
     /* ── طباعة الباركود ──────────────────────────────── */
     document.getElementById('printBarcodeBtn')?.addEventListener('click', _printBarcodesFromForm);
@@ -634,6 +649,7 @@ const MedicinesPage = (() => {
     const min = document.getElementById('fMedMinStock'); if (min) min.value = '10';
     const cat = document.getElementById('fMedCategory'); if (cat) cat.value = '';
     const sup = document.getElementById('fMedSupplier'); if (sup) sup.value = '';
+    const unit = document.getElementById('fMedUnitType'); if (unit) unit.value = 'علبة';
     const exp = document.getElementById('fMedExpiry'); if (exp) exp.value = '';
     ['previewCompanyBarcode','previewPharmacyBarcode'].forEach(id => {
       const el = document.getElementById(id); if (el) el.innerHTML = '';
@@ -662,27 +678,19 @@ const MedicinesPage = (() => {
   function _printBarcodesFromForm() {
     const qty  = parseInt(document.getElementById('fMedQuantityPerBox')?.value) || 1;
     const name = document.getElementById('fMedName')?.value.trim() || 'دواء';
-    const companyBC  = document.getElementById('fMedCompanyBarcode')?.value.trim();
-    const pharmacyBC = document.getElementById('fMedPharmacyBarcode')?.value.trim();
+    const pharmacyBC = _ensurePharmacyBarcode(true);
     const price      = document.getElementById('fMedSellPrice')?.value || '';
     const expiry     = document.getElementById('fMedExpiry')?.value || '';
-
-    if (!companyBC && !pharmacyBC) {
-      Toast.warn('تنبيه', 'أدخل باركود الشركة أو باركود الصيدلية أولاً');
-      return;
-    }
-    const settings = typeof DeviceSettings !== 'undefined' ? DeviceSettings.get() : {};
     const pharmacyName = document.querySelector('.brand-name')?.textContent?.trim() || 'الصيدلية';
 
     /* بناء ورقة الملصقات */
-    const makeSticker = (bcVal, label, color) => {
-      if (!bcVal) return '';
-      const svg = BarcodeGenerator.generateSVG(bcVal, { height: 28, includeText: true, color });
+    const makeSticker = bcVal => {
+      const svg = BarcodeGenerator.generateSVG(bcVal, { height: 28, includeText: true, color: '#0d5c5c' });
       return `
         <div class="barcode-sticker">
           <div class="bs-pharmacy">${pharmacyName}</div>
           <div class="bs-name">${name}</div>
-          <div class="bs-bc-label">${label}</div>
+          <div class="bs-bc-label">باركود الصيدلية</div>
           <div class="bs-barcode">${svg}</div>
           <div class="bs-info">
             <span>${price ? price + ' ر.س' : ''}</span>
@@ -693,8 +701,7 @@ const MedicinesPage = (() => {
 
     let stickers = '';
     for (let i = 0; i < qty; i++) {
-      stickers += makeSticker(companyBC,  'باركود الشركة',   '#1a1a1a');
-      stickers += makeSticker(pharmacyBC, 'باركود الصيدلية', '#0d5c5c');
+      stickers += makeSticker(pharmacyBC);
     }
 
     const sheet = document.createElement('div');
@@ -705,7 +712,8 @@ const MedicinesPage = (() => {
     setTimeout(() => sheet.remove(), 500);
   }
 
-  async function saveMedicine(closeModal = false) {
+  async function saveMedicine(printAfterSave = false) {
+    if (printAfterSave) _ensurePharmacyBarcode(false);
     const data = {
       name:            document.getElementById('fMedName')?.value.trim(),
       scientificName:  document.getElementById('fMedScientific')?.value.trim(),
@@ -735,18 +743,25 @@ const MedicinesPage = (() => {
       return;
     }
 
-    const btn = document.getElementById('saveMedBtn');
-    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> جارٍ الحفظ...'; }
+    const saveBtn = document.getElementById('saveMedBtn');
+    const savePrintBtn = document.getElementById('savePrintMedBtn');
+    [saveBtn, savePrintBtn].forEach(btn => { if (btn) btn.disabled = true; });
+    const activeBtn = printAfterSave ? savePrintBtn : saveBtn;
+    if (activeBtn) activeBtn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> جارٍ الحفظ...';
     try {
       await DB.addMedicine(data);
-      Toast.ok('تم الحفظ ✓', `تم إضافة "${data.name}" — يمكنك إضافة دواء جديد أو الإغلاق`);
+      if (printAfterSave) _printBarcodesFromForm();
+      Toast.ok('تم الحفظ بنجاح', printAfterSave
+        ? `تم حفظ "${data.name}" وإرسال باركود الصيدلية للطباعة`
+        : `تم حفظ "${data.name}" — يمكنك طباعته الآن أو بدء مسودة جديدة`);
       await _loadData();
       /* إعادة تعيين الحقول المتغيرة بين دفعة ودفعة */
       _resetBetweenBatches();
     } catch(e) {
       Toast.err('خطأ', e.message);
     } finally {
-      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-check"></i> حفظ الصنف'; }
+      if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<i class="fas fa-check"></i> حفظ'; }
+      if (savePrintBtn) { savePrintBtn.disabled = false; savePrintBtn.innerHTML = '<i class="fas fa-floppy-disk"></i> حفظ وطباعة'; }
     }
   }
 
@@ -754,17 +769,12 @@ const MedicinesPage = (() => {
   function _resetBetweenBatches() {
     const resetIds = ['fMedQuantityPerBox','fMedCostPrice','fMedSellPrice','fMedExpiry','fMedBatch'];
     resetIds.forEach(id => { const el = document.getElementById(id); if (el) el.value = id === 'fMedQuantityPerBox' ? '0' : ''; });
-    /* إعادة تعيين الباركودين */
-    ['fMedCompanyBarcode','fMedPharmacyBarcode'].forEach(id => {
-      const el = document.getElementById(id); if (el) el.value = '';
-    });
-    ['previewCompanyBarcode','previewPharmacyBarcode'].forEach(id => {
-      const el = document.getElementById(id); if (el) el.innerHTML = '';
-    });
+    /* نحافظ على الباركودين بعد الحفظ حتى تطبع الملصق بنفس الكود المخزن.
+       يتم مسحهما فقط عند الضغط على "مسودة جديدة". */
     /* إخفاء autofill hint */
     document.getElementById('autofillHint') && (document.getElementById('autofillHint').style.display = 'none');
     const mc = document.getElementById('marginCalc'); if (mc) mc.textContent = '—';
-    document.getElementById('fMedCompanyBarcode')?.focus();
+    document.getElementById('printBarcodeBtn')?.focus();
   }
 
   function editMedicine(med) {

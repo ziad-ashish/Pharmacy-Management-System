@@ -1,12 +1,205 @@
 'use strict';
-const DashboardPage=(()=>{
- function render(){const u=Auth.getCurrent(),n=_esc((u?.fullName||u?.username||'مستخدم').split(/\s+/).slice(0,2).join(' ')),d=new Intl.DateTimeFormat('ar-EG',{weekday:'long',day:'numeric',month:'long',year:'numeric'}).format(new Date());return `<div class="page active" id="page-dashboard"><div class="ops-hero"><div><div class="page-kicker">مركز العمليات</div><h2>مرحباً، ${n}</h2><p>${d} — ملخص الوردية وحالة المخزون.</p></div><div class="ops-health">النظام يعمل بصورة طبيعية</div></div><div id="dashContent"><div class="metric-grid">${Array(4).fill('<div class="metric-card"><div class="skeleton" style="height:76px"></div></div>').join('')}</div></div></div>`}
- async function afterRender(){try{const [s,m,t,a,l,e]=await Promise.all([DB.getStats(),DB.getMonthlySales(),DB.getTopMeds(),DB.getRecentActivity(),DB.getLowStock(),DB.getExpiring()]);draw(s,m,t,a,l,e)}catch(e){document.getElementById('dashContent').innerHTML=`<div class="alert err">تعذر تحميل لوحة العمليات: ${_esc(e.message)}</div>`}}
- function metric(icon,label,value,tag,color,bg){return `<article class="metric-card" style="--metric:${color};--metric-bg:${bg}"><div class="metric-top"><span class="metric-icon"><i class="fas ${icon}"></i></span><span class="metric-tag">${tag}</span></div><div class="metric-value">${value}</div><div class="metric-label">${label}</div></article>`}
- function draw(s,monthly,top,activity,low,expiring){const alerts=[...low.slice(0,3).map(m=>({i:'fa-box-open',c:'warn',n:m.name,d:`متبقي ${m.stock} — حد الطلب ${m.minStock}`,t:'مخزون منخفض'})),...expiring.slice(0,3).map(m=>({i:'fa-calendar-xmark',c:'err',n:m.name,d:`تنتهي في ${m.expiry}`,t:'صلاحية قريبة'}))].slice(0,5);document.getElementById('dashContent').innerHTML=`
- <div class="metric-grid">${metric('fa-cash-register','مبيعات اليوم',Fmt.money(s.todayRevenue),`${s.todayCount} فاتورة`,'#0f766e','#f0fbf9')}${metric('fa-chart-line','إيرادات الشهر',Fmt.money(s.monthRevenue),'الشهر الحالي','#2563a8','#eef5fd')}${metric('fa-boxes-stacked','الأصناف النشطة',Fmt.num(s.totalMeds),`${s.outOfStock||0} نافد`,'#6b57b6','#f3f0fc')}${metric('fa-triangle-exclamation','تحتاج متابعة',Fmt.num((s.lowStock||0)+(s.expiring||0)),'مخزون وصلاحية','#ba6b0b','#fff5e5')}</div>
- <div class="card" style="margin-bottom:.8rem"><div class="card-head"><span class="card-title"><i class="fas fa-bolt"></i> اختصارات الوردية</span></div><div class="card-body"><div class="action-list"><button class="action-tile" onclick="App.navigate('sales')"><i class="fas fa-cart-plus"></i><span><strong>فاتورة بيع</strong><small>ابدأ عملية بيع جديدة</small></span></button><button class="action-tile" onclick="App.navigate('medicines');setTimeout(()=>MedicinesPage.openAddModal(),250)"><i class="fas fa-capsules"></i><span><strong>إضافة صنف</strong><small>دواء أو منتج جديد</small></span></button><button class="action-tile" onclick="App.navigate('invoices')"><i class="fas fa-receipt"></i><span><strong>سجل الفواتير</strong><small>مراجعة أو طباعة</small></span></button><button class="action-tile" onclick="App.navigate('reports')"><i class="fas fa-chart-column"></i><span><strong>تقرير الوردية</strong><small>المبيعات والأرباح</small></span></button></div></div></div>
- <div class="dashboard-grid"><div class="card"><div class="card-head"><span class="card-title"><i class="fas fa-chart-simple"></i> اتجاه المبيعات خلال السنة</span><span class="badge bdg-teal">${new Date().getFullYear()}</span></div><div class="card-body"><div class="bar-chart tall" id="dashMonthly"></div></div></div><div class="card"><div class="card-head"><span class="card-title"><i class="fas fa-bell"></i> تحتاج تدخل الآن</span><button class="btn btn-ghost btn-sm" onclick="App.navigate('medicines')">المخزون</button></div><div class="card-body">${alerts.length?`<div class="attention-list">${alerts.map(x=>`<div class="attention-row"><span class="attention-icon" style="background:var(--${x.c}-light);color:var(--${x.c})"><i class="fas ${x.i}"></i></span><div><strong>${_esc(x.n)}</strong><small>${_esc(x.d)}</small></div><span class="badge ${x.c==='err'?'bdg-err':'bdg-warn'}">${x.t}</span></div>`).join('')}</div>`:'<div class="empty-state" style="padding:2rem"><div class="es-icon"><i class="fas fa-circle-check"></i></div><h3 class="es-title">المخزون مستقر</h3></div>'}</div></div></div>
- <div class="dashboard-grid"><div class="card"><div class="card-head"><span class="card-title"><i class="fas fa-ranking-star"></i> الأصناف الأكثر حركة</span></div><div class="card-body p0"><table class="dtable"><thead><tr><th>الصنف</th><th>الكمية</th><th>الإيراد</th></tr></thead><tbody>${top.length?top.map(m=>`<tr><td><strong>${_esc(m.name)}</strong></td><td>${Fmt.num(m.qty)}</td><td>${Fmt.money(m.revenue)}</td></tr>`).join(''):'<tr><td colspan="3" class="text-center text-muted">لا توجد مبيعات</td></tr>'}</tbody></table></div></div><div class="card"><div class="card-head"><span class="card-title"><i class="fas fa-clock-rotate-left"></i> آخر العمليات</span></div><div class="card-body">${activity.length?activity.slice(0,5).map(x=>`<div class="attention-row"><span class="attention-icon" style="background:var(--teal-50);color:var(--teal-600)"><i class="fas ${x.icon}"></i></span><div><strong>${_esc(x.title)}</strong><small>${_esc(x.desc)}</small></div><span class="text-xs text-muted">${x.time}</span></div>`).join(''):'<p class="text-center text-muted">لا توجد عمليات حديثة</p>'}</div></div></div>`;requestAnimationFrame(()=>renderBarChart('dashMonthly',monthly.labels.map(x=>x.slice(0,3)),monthly.values,'linear-gradient(180deg,#2fb3a7,#0f766e)'))}
- return{render,afterRender}
+
+const DashboardPage = (() => {
+  let _range = null;
+
+  function _isoLocal(value = new Date()) {
+    const y = value.getFullYear();
+    const m = String(value.getMonth() + 1).padStart(2, '0');
+    const d = String(value.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  function _defaultRange() {
+    const now = new Date();
+    return { from: _isoLocal(new Date(now.getFullYear(), now.getMonth(), 1)), to: _isoLocal(now) };
+  }
+
+  function render() {
+    const user = Auth.getCurrent();
+    const name = _esc((user?.fullName || user?.username || 'مستخدم').split(/\s+/).slice(0, 2).join(' '));
+    const dayText = new Intl.DateTimeFormat('ar-EG', {
+      weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+    }).format(new Date());
+    _range = _defaultRange();
+
+    return `
+      <div class="page active dashboard-ops" id="page-dashboard">
+        <section class="dash-welcome">
+          <div>
+            <span class="dash-eyebrow">نظرة تشغيلية موحّدة</span>
+            <h1>مرحباً، ${name}</h1>
+            <p>${dayText} — المبيعات والمخزون والمهام التي تحتاج تدخلك.</p>
+          </div>
+          <span class="dash-system-status"><i></i> النظام يعمل بصورة طبيعية</span>
+        </section>
+
+        <section class="dash-range-panel" aria-label="تحديد فترة التقرير">
+          <div class="dash-range-title">
+            <span class="dash-range-icon"><i class="fas fa-calendar-days"></i></span>
+            <div><strong>فترة التقرير</strong><small>كل مؤشرات المبيعات أدناه تتبع الفترة نفسها</small></div>
+          </div>
+          <div class="dash-presets" id="dashPresets">
+            <button type="button" data-preset="today">اليوم</button>
+            <button type="button" data-preset="7">7 أيام</button>
+            <button type="button" data-preset="month" class="active">هذا الشهر</button>
+            <button type="button" data-preset="90">90 يومًا</button>
+          </div>
+          <label class="dash-date-field"><span>من تاريخ</span><input type="date" id="dashFrom" value="${_range.from}"></label>
+          <label class="dash-date-field"><span>إلى تاريخ</span><input type="date" id="dashTo" value="${_range.to}"></label>
+          <button type="button" class="btn btn-primary dash-apply" id="dashApply"><i class="fas fa-filter"></i> تطبيق</button>
+          <button type="button" class="btn btn-ghost dash-full-report" id="dashOpenReports"><i class="fas fa-chart-column"></i> التقارير التفصيلية</button>
+        </section>
+
+        <div class="dash-period-note" id="dashPeriodNote"></div>
+        <div id="dashContent">
+          <div class="metric-grid">${Array(4).fill('<div class="metric-card"><div class="skeleton" style="height:90px"></div></div>').join('')}</div>
+        </div>
+      </div>`;
+  }
+
+  async function afterRender() {
+    document.getElementById('dashOpenReports')?.addEventListener('click', () => App.navigate('reports'));
+    document.getElementById('dashApply')?.addEventListener('click', _loadSelectedRange);
+    document.getElementById('dashPresets')?.addEventListener('click', e => {
+      const button = e.target.closest('[data-preset]');
+      if (!button) return;
+      const now = new Date();
+      let from = new Date(now);
+      if (button.dataset.preset === '7') from.setDate(now.getDate() - 6);
+      else if (button.dataset.preset === '90') from.setDate(now.getDate() - 89);
+      else if (button.dataset.preset === 'month') from = new Date(now.getFullYear(), now.getMonth(), 1);
+      document.getElementById('dashFrom').value = _isoLocal(from);
+      document.getElementById('dashTo').value = _isoLocal(now);
+      document.querySelectorAll('#dashPresets button').forEach(b => b.classList.toggle('active', b === button));
+      _loadSelectedRange();
+    });
+    await _loadSelectedRange();
+  }
+
+  async function _loadSelectedRange() {
+    const from = document.getElementById('dashFrom')?.value;
+    const to = document.getElementById('dashTo')?.value;
+    if (!from || !to) return Toast.warn('الفترة غير مكتملة', 'اختر تاريخ البداية وتاريخ النهاية');
+    if (from > to) return Toast.warn('الفترة غير صحيحة', 'تاريخ البداية يجب أن يسبق تاريخ النهاية');
+
+    _range = { from, to };
+    const applyButton = document.getElementById('dashApply');
+    if (applyButton) {
+      applyButton.disabled = true;
+      applyButton.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> تحديث';
+    }
+    const content = document.getElementById('dashContent');
+    content?.classList.add('is-loading');
+
+    try {
+      const [report, low, expiring] = await Promise.all([
+        DB.getDashboardReport(from, to), DB.getLowStock(), DB.getExpiring(),
+      ]);
+      _draw(report, low || [], expiring || []);
+    } catch (error) {
+      if (content) content.innerHTML = `<div class="alert err"><i class="fas fa-circle-xmark"></i> تعذر تحميل لوحة التحكم: ${_esc(error.message)}</div>`;
+    } finally {
+      content?.classList.remove('is-loading');
+      if (applyButton) {
+        applyButton.disabled = false;
+        applyButton.innerHTML = '<i class="fas fa-filter"></i> تطبيق';
+      }
+    }
+  }
+
+  function _metric(icon, label, value, note, tone) {
+    return `
+      <article class="dash-metric ${tone}">
+        <span class="dash-metric-icon"><i class="fas ${icon}"></i></span>
+        <div class="dash-metric-copy"><small>${label}</small><strong>${value}</strong><span>${note}</span></div>
+      </article>`;
+  }
+
+  function _formatRangeDate(value) {
+    return new Date(`${value}T12:00:00`).toLocaleDateString('ar-EG', {day:'numeric', month:'short', year:'numeric'});
+  }
+
+  function _formatBucket(value, granularity) {
+    if (granularity === 'month') {
+      const [year, month] = value.split('-').map(Number);
+      return new Date(year, month - 1, 1).toLocaleDateString('ar-EG', {month:'short', year:'2-digit'});
+    }
+    return new Date(`${value}T12:00:00`).toLocaleDateString('ar-EG', {day:'numeric', month:'short'});
+  }
+
+  function _draw(report, low, expiring) {
+    const summary = report.summary || {};
+    const growth = summary.growthPct;
+    const growthNote = growth === null || growth === undefined
+      ? 'لا توجد فترة سابقة للمقارنة'
+      : `${growth >= 0 ? 'ارتفاع' : 'انخفاض'} ${Math.abs(growth)}% عن الفترة السابقة`;
+    const alerts = [
+      ...low.slice(0, 3).map(m => ({icon:'fa-box-open', level:'warn', name:m.name, detail:`متبقي ${m.stock} — حد الطلب ${m.minStock}`, label:'مخزون منخفض'})),
+      ...expiring.slice(0, 3).map(m => ({icon:'fa-calendar-xmark', level:'danger', name:m.name, detail:`تنتهي في ${m.expiry}`, label:'صلاحية'})),
+    ].slice(0, 5);
+    const series = report.series || {labels:[], values:[], granularity:'day'};
+    const periodNote = document.getElementById('dashPeriodNote');
+    if (periodNote) periodNote.innerHTML = `<i class="fas fa-chart-line"></i> تعرض النتائج من <strong>${_formatRangeDate(report.from)}</strong> إلى <strong>${_formatRangeDate(report.to)}</strong>`;
+
+    const content = document.getElementById('dashContent');
+    if (!content) return;
+    content.innerHTML = `
+      <div class="dash-metrics-grid">
+        ${_metric('fa-sack-dollar', 'صافي المبيعات', Fmt.money(summary.revenue || 0), growthNote, 'teal')}
+        ${_metric('fa-receipt', 'الفواتير المكتملة', Fmt.num(summary.count || 0), `خصومات ${Fmt.money(summary.discount || 0)}`, 'blue')}
+        ${_metric('fa-chart-simple', 'متوسط الفاتورة', Fmt.money(summary.average || 0), `ضريبة محصلة ${Fmt.money(summary.tax || 0)}`, 'violet')}
+        ${_metric('fa-coins', 'الربح الإجمالي التقديري', Fmt.money(summary.estimatedProfit || 0), `تكلفة تقديرية ${Fmt.money(summary.estimatedCost || 0)}`, 'amber')}
+      </div>
+
+      <section class="dash-quick-section">
+        <div class="dash-section-heading"><div><strong>إجراءات سريعة</strong><small>أكثر المهام استخدامًا أثناء الوردية</small></div></div>
+        <div class="dash-quick-grid">
+          <button onclick="App.navigate('sales')"><i class="fas fa-cart-plus"></i><span><strong>فاتورة بيع</strong><small>بدء عملية بيع جديدة</small></span><i class="fas fa-chevron-left"></i></button>
+          <button onclick="App.navigate('medicines');setTimeout(()=>MedicinesPage.openAddModal(),250)"><i class="fas fa-capsules"></i><span><strong>إضافة صنف</strong><small>تسجيل دواء أو منتج</small></span><i class="fas fa-chevron-left"></i></button>
+          <button onclick="App.navigate('shortage')"><i class="fas fa-clipboard-list"></i><span><strong>كشكول النواقص</strong><small>مراجعة الأصناف المطلوبة</small></span><i class="fas fa-chevron-left"></i></button>
+          <button onclick="App.navigate('reports')"><i class="fas fa-chart-column"></i><span><strong>التقارير</strong><small>تحليل المبيعات والأرباح</small></span><i class="fas fa-chevron-left"></i></button>
+        </div>
+      </section>
+
+      <div class="dash-main-grid">
+        <section class="dash-panel dash-sales-panel">
+          <header><div><strong>اتجاه المبيعات</strong><small>حسب الفترة المحددة</small></div><span>${series.granularity === 'month' ? 'شهري' : 'يومي'}</span></header>
+          <div class="dash-chart-wrap">${series.values.length ? '<div class="bar-chart tall" id="dashRangeChart"></div>' : '<div class="dash-empty"><i class="fas fa-chart-column"></i><strong>لا توجد مبيعات في هذه الفترة</strong><span>اختر فترة أخرى أو ابدأ عملية بيع جديدة</span></div>'}</div>
+          <div class="dash-payment-row">${(report.payments || []).length ? report.payments.map(p => `<span><i class="fas fa-credit-card"></i>${_esc(p.method || 'غير محدد')} <strong>${Fmt.money(p.total)}</strong></span>`).join('') : '<small>لا توجد طرق دفع مسجلة للفترة</small>'}</div>
+        </section>
+        <section class="dash-panel dash-alert-panel">
+          <header><div><strong>تحتاج تدخلك الآن</strong><small>تنبيهات لحظية وليست مرتبطة بفترة التقرير</small></div><button onclick="App.navigate('medicines')">فتح المخزون</button></header>
+          <div class="dash-alert-list">${alerts.length ? alerts.map(item => `
+            <div class="dash-alert-row ${item.level}">
+              <i class="fas ${item.icon}"></i><div><strong>${_esc(item.name)}</strong><small>${_esc(item.detail)}</small></div><span>${item.label}</span>
+            </div>`).join('') : '<div class="dash-empty compact"><i class="fas fa-circle-check"></i><strong>المخزون مستقر</strong><span>لا توجد تنبيهات عاجلة</span></div>'}</div>
+        </section>
+      </div>
+
+      <div class="dash-lower-grid">
+        <section class="dash-panel">
+          <header><div><strong>الأصناف الأكثر مبيعًا</strong><small>الترتيب داخل الفترة المحددة</small></div></header>
+          <div class="tbl-wrap"><table class="dtable dash-table"><thead><tr><th>الصنف</th><th>الكمية</th><th>الإيراد</th></tr></thead><tbody>
+            ${(report.topMedicines || []).length ? report.topMedicines.map((m, index) => `<tr><td><span class="dash-rank">${index + 1}</span><strong>${_esc(m.name)}</strong></td><td>${Fmt.num(m.qty)}</td><td>${Fmt.money(m.revenue)}</td></tr>`).join('') : '<tr><td colspan="3" class="text-center text-muted">لا توجد أصناف مباعة في الفترة</td></tr>'}
+          </tbody></table></div>
+        </section>
+        <section class="dash-panel">
+          <header><div><strong>آخر الفواتير</strong><small>أحدث العمليات داخل الفترة</small></div><button onclick="App.navigate('invoices')">كل الفواتير</button></header>
+          <div class="dash-recent-list">${(report.recentSales || []).length ? report.recentSales.map(sale => `
+            <div class="dash-recent-row"><i class="fas fa-receipt"></i><div><strong>${_esc(sale.invoice_num)}</strong><small>${_esc(sale.patient_name || 'عميل نقدي')} · ${_esc(sale.payment_method || 'غير محدد')}</small></div><span><strong>${Fmt.money(sale.total)}</strong><small>${_esc(sale.sale_date)} ${_esc(sale.sale_time)}</small></span></div>`).join('') : '<div class="dash-empty compact"><i class="fas fa-receipt"></i><strong>لا توجد فواتير</strong><span>خلال الفترة المحددة</span></div>'}</div>
+        </section>
+      </div>`;
+
+    if (series.values.length) {
+      requestAnimationFrame(() => renderBarChart(
+        'dashRangeChart',
+        series.labels.map(label => _formatBucket(label, series.granularity)),
+        series.values,
+        'linear-gradient(180deg,#37b9ad,#11766e)',
+      ));
+    }
+  }
+
+  return { render, afterRender };
 })();

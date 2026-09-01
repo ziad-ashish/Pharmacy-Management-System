@@ -458,6 +458,54 @@ const DB = {
 
   /* ── STATS ──────────────────────────────────────────── */
   async getStats()          { return _IS_FLASK ? _api('get_stats')           : _LS.getStats(); },
+  async getDashboardReport(fromDate, toDate) {
+    if (_IS_FLASK) {
+      return _api('get_dashboard_report', {params:{from_date:fromDate,to_date:toDate}});
+    }
+
+    const [sales, medicines] = await Promise.all([_LS.getSales(), _LS.getMedicines()]);
+    const completed = sales.filter(s => s.status === 'مكتمل' && s.date >= fromDate && s.date <= toDate);
+    const medCosts = Object.fromEntries(medicines.map(m => [m.id, Number(m.cost) || 0]));
+    const revenue = completed.reduce((sum, s) => sum + Number(s.total || 0), 0);
+    const estimatedCost = completed.reduce((sum, s) => sum + (s.items || []).reduce(
+      (itemSum, item) => itemSum + Number(item.qty || 0) * (medCosts[item.medId] || 0), 0), 0);
+    const spanDays = Math.floor((new Date(toDate) - new Date(fromDate)) / 86400000) + 1;
+    const bucketOf = value => spanDays <= 62 ? value : value.slice(0, 7);
+    const seriesMap = {};
+    const topMap = {};
+    const paymentMap = {};
+    completed.forEach(s => {
+      const bucket = bucketOf(s.date);
+      seriesMap[bucket] = (seriesMap[bucket] || 0) + Number(s.total || 0);
+      const method = s.paymentMethod || 'غير محدد';
+      paymentMap[method] ||= {method,count:0,total:0};
+      paymentMap[method].count += 1;
+      paymentMap[method].total += Number(s.total || 0);
+      (s.items || []).forEach(item => {
+        topMap[item.name] ||= {name:item.name,qty:0,revenue:0};
+        topMap[item.name].qty += Number(item.qty || 0);
+        topMap[item.name].revenue += Number(item.total || 0);
+      });
+    });
+    return {
+      from:fromDate,
+      to:toDate,
+      summary:{
+        count:completed.length,
+        revenue,
+        average:completed.length ? revenue / completed.length : 0,
+        discount:completed.reduce((sum,s)=>sum+Number(s.discount||0),0),
+        tax:completed.reduce((sum,s)=>sum+Number(s.tax||0),0),
+        estimatedCost,
+        estimatedProfit:revenue-estimatedCost,
+        growthPct:null,
+      },
+      series:{labels:Object.keys(seriesMap).sort(),values:Object.keys(seriesMap).sort().map(k=>seriesMap[k]),granularity:spanDays<=62?'day':'month'},
+      topMedicines:Object.values(topMap).sort((a,b)=>b.qty-a.qty).slice(0,5),
+      recentSales:completed.slice().sort((a,b)=>`${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`)).slice(0,6).map(s=>({invoice_num:s.invoiceNum,patient_name:s.patientName,total:s.total,sale_date:s.date,sale_time:s.time,payment_method:s.paymentMethod})),
+      payments:Object.values(paymentMap).sort((a,b)=>b.total-a.total),
+    };
+  },
   async getMonthlySales()   { return _IS_FLASK ? _api('get_monthly_sales')   : _LS.getMonthlySales(); },
   async getTopMeds()        { return _IS_FLASK ? _api('get_top_medicines')   : _LS.getTopMedicines(); },
   async getCatDist()        { return _IS_FLASK ? _api('get_category_dist')   : _LS.getCategoryDist(); },
