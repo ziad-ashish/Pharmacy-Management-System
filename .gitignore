@@ -1,0 +1,56 @@
+# ══════════════════════════════════════
+#  Pharmacy Management System — .gitignore
+# ══════════════════════════════════════
+
+# قاعدة البيانات (تحتوي بيانات العملاء الحقيقية)
+pharmacy.db
+pharmacy.db-wal
+pharmacy.db-shm
+
+# النسخ الاحتياطية
+backups/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Virtual environments
+venv/
+env/
+.venv/
+.env/
+
+# بيئات Python المحلية
+*.egg-info/
+dist/
+build/
+
+# ملفات النظام
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE files
+.vscode/
+.idea/
+*.suo
+*.user
+
+# Logs
+*.log
+logs/
+
+# ملفات مؤقتة
+*.tmp
+*.temp
+~$*
+
+# ملفات التوزيع (لو بتبني executable)
+output/
+release/
+*.exe
+*.msi
+*.dmg
