@@ -21,7 +21,7 @@
 #  [3.16] audit_log table + get_audit_log
 # ══════════════════════════════════════════════════════════════
 
-import sqlite3, json, os, uuid, hashlib, secrets, shutil
+import sqlite3, json, os, uuid, hashlib, hmac, secrets, shutil
 from datetime import datetime, date, timedelta
 
 DB_PATH     = os.path.join(os.path.dirname(__file__), "pharmacy.db")
@@ -75,7 +75,7 @@ def _verify_password(pwd: str, stored: str) -> bool:
     """Supports pbkdf2 (new), raw sha256 (old), and plain (seed legacy)."""
     if stored.startswith("pbkdf2:"):
         _, salt, _ = stored.split(":", 2)
-        return _hash_password(pwd, salt) == stored
+        return hmac.compare_digest(_hash_password(pwd, salt), stored)
     # legacy sha256
     if stored == hashlib.sha256(pwd.encode()).hexdigest():
         return True
@@ -1105,35 +1105,46 @@ class PharmacyAPI:
 
     # ── AUTH ──────────────────────────────────────────────────
     def login(self, username: str, password: str):
-        # FIX [2.10]: lockout after 5 failed attempts
+        # Normalize once so "Admin", " admin " and "admin" resolve to the
+        # same account and share the same lockout counter.
         global _LOGIN_FAILURES
+        username = (username or "").strip().casefold()
+        password = password or ""
+        if not username or not password:
+            return _err("يرجى إدخال اسم المستخدم وكلمة المرور")
+
         now = datetime.now()
-        if username in _LOGIN_FAILURES:
-            count, lockout_until = _LOGIN_FAILURES[username]
-            if lockout_until and now < lockout_until:
-                remaining = int((lockout_until - now).total_seconds())
+        count, lockout_until = _LOGIN_FAILURES.get(username, (0, None))
+        if lockout_until:
+            if now < lockout_until:
+                remaining = max(1, int((lockout_until - now).total_seconds()))
                 return _err(f"الحساب مقفل مؤقتاً. حاول مرة أخرى بعد {remaining} ثانية.")
+            # Lock expired: start with a clean counter instead of immediately
+            # locking the user again on the next typo.
+            _LOGIN_FAILURES.pop(username, None)
+            count = 0
+
+        def failed_attempt():
+            next_count = count + 1
+            if next_count >= _MAX_ATTEMPTS:
+                until = now + timedelta(seconds=_LOCKOUT_SECS)
+                _LOGIN_FAILURES[username] = (next_count, until)
+                return _err(f"تم قفل الحساب مؤقتاً لمدة {_LOCKOUT_SECS//60} دقيقة بسبب محاولات دخول متكررة.")
+            _LOGIN_FAILURES[username] = (next_count, None)
+            remaining = _MAX_ATTEMPTS - next_count
+            return _err(f"اسم المستخدم أو كلمة المرور غير صحيحة. متبقي {remaining} محاولة قبل القفل المؤقت.")
+
+        con = None
         try:
             con = _conn()
             row = con.execute(
-                "SELECT * FROM users WHERE username=?", (username,)
+                "SELECT * FROM users WHERE username=? COLLATE NOCASE", (username,)
             ).fetchone()
             if not row:
-                con.close()
-                # increment failures even for unknown users (prevent enumeration)
-                _LOGIN_FAILURES[username] = (_LOGIN_FAILURES.get(username, (0,None))[0]+1, None)
-                return _err("اسم المستخدم غير صحيح")
+                return failed_attempt()
             user = dict(row)
-            # FIX [2.8]: verify with pbkdf2, fall back to sha256 / plain → upgrade
             if not _verify_password(password, user["password"]):
-                count = _LOGIN_FAILURES.get(username, (0,None))[0] + 1
-                lockout = (now + timedelta(seconds=_LOCKOUT_SECS)) if count >= _MAX_ATTEMPTS else None
-                _LOGIN_FAILURES[username] = (count, lockout)
-                if lockout:
-                    return _err(f"تم قفل الحساب مؤقتاً لـ {_LOCKOUT_SECS//60} دقيقة بسبب محاولات دخول متكررة.")
-                remaining_attempts = _MAX_ATTEMPTS - count
-                con.close()
-                return _err(f"كلمة المرور غير صحيحة. متبقي {remaining_attempts} محاولة قبل القفل المؤقت.")
+                return failed_attempt()
             # Success — clear failures, upgrade hash if needed
             _LOGIN_FAILURES.pop(username, None)
             stored = user["password"]
@@ -1142,13 +1153,16 @@ class PharmacyAPI:
                 con.execute("UPDATE users SET password=? WHERE id=?", (new_hash, user["id"]))
             now_iso = now.isoformat()
             con.execute("UPDATE users SET last_login=? WHERE id=?", (now_iso, user["id"]))
-            con.commit(); con.close()
+            con.commit()
             user.pop("password", None)
             # FIX [2.12]: flag default password
             user["is_default_password"] = password in ("admin123", "123456")
             return _ok(user)
         except Exception as e:
             return _err(str(e))
+        finally:
+            if con is not None:
+                con.close()
 
     def get_users(self):
         con  = _conn()
@@ -1190,6 +1204,10 @@ class PharmacyAPI:
     def add_user(self, data: str, caller_id: str = None):
         try:
             d   = json.loads(data)
+            username = str(d.get("username", "")).strip().casefold()
+            full_name = str(d.get("full_name", "")).strip()
+            if not username or not full_name:
+                return _err("اسم المستخدم والاسم الكامل مطلوبان")
             con = _conn()
             # only admin can add users
             if caller_id:
@@ -1197,7 +1215,7 @@ class PharmacyAPI:
                 if not caller or caller["role"] != "مدير النظام":
                     con.close(); return _err("غير مصرح — هذه العملية للمدير فقط")
             # check username uniqueness
-            dup = con.execute("SELECT id FROM users WHERE username=?", (d.get("username",""),)).fetchone()
+            dup = con.execute("SELECT id FROM users WHERE username=? COLLATE NOCASE", (username,)).fetchone()
             if dup:
                 con.close(); return _err("اسم المستخدم موجود بالفعل")
             nid = _new_id("U")
@@ -1205,36 +1223,37 @@ class PharmacyAPI:
             con.execute(
                 "INSERT INTO users(id,username,password,full_name,role,phone,email,created_at,last_login)"
                 " VALUES(?,?,?,?,?,?,?,?,?)",
-                (nid, d.get("username"), _hash_password(pwd), d.get("full_name",""),
+                (nid, username, _hash_password(pwd), full_name,
                  d.get("role","صيدلاني مسؤول"), d.get("phone",""), d.get("email",""),
                  date.today().isoformat(), None)
             )
-            _audit(con, caller_id, "ADD_USER", "user", nid, d.get("username",""))
+            _audit(con, caller_id, "ADD_USER", "user", nid, username)
             con.commit(); con.close(); return _ok(nid)
         except Exception as e: return _err(str(e))
 
     def update_user(self, uid: str, data: str, caller_id: str = None):
         try:
             d   = json.loads(data)
+            username = str(d.get("username", "")).strip().casefold() if d.get("username") is not None else ""
             con = _conn()
             if caller_id:
                 caller = con.execute("SELECT role FROM users WHERE id=?", (caller_id,)).fetchone()
                 if not caller or caller["role"] != "مدير النظام":
                     con.close(); return _err("غير مصرح — هذه العملية للمدير فقط")
             # check username uniqueness (excluding self)
-            if d.get("username"):
+            if username:
                 dup = con.execute(
-                    "SELECT id FROM users WHERE username=? AND id!=?",
-                    (d["username"], uid)
+                    "SELECT id FROM users WHERE username=? COLLATE NOCASE AND id!=?",
+                    (username, uid)
                 ).fetchone()
                 if dup:
                     con.close(); return _err("اسم المستخدم موجود بالفعل")
             con.execute(
                 "UPDATE users SET full_name=?, role=?, phone=?, email=?"
-                + (", username=?" if d.get("username") else "")
+                + (", username=?" if username else "")
                 + " WHERE id=?",
                 ([d.get("full_name"), d.get("role"), d.get("phone",""), d.get("email","")]
-                 + ([d["username"]] if d.get("username") else [])
+                 + ([username] if username else [])
                  + [uid])
             )
             _audit(con, caller_id, "UPDATE_USER", "user", uid, d.get("full_name",""))

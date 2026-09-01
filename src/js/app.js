@@ -40,7 +40,8 @@ const Auth = (() => {
     const u = getCurrent();
     return !!(u && u.id);
   }
-  return { getCurrent, set, clear, isLoggedIn, lastUsername };
+  function isRemembered() { return !!_parse(localStorage.getItem(KEY)); }
+  return { getCurrent, set, clear, isLoggedIn, isRemembered, lastUsername };
 })();
 
 const App = (() => {
@@ -61,12 +62,27 @@ const App = (() => {
   };
 
   /* ── INIT ── */
-  function init() {
+  async function init() {
     DB.seed();
     Theme.init();
 
     if (!Auth.isLoggedIn()) {
       _setupLogin();
+      return;
+    }
+    // Never trust a stale browser session blindly. The account may have been
+    // removed or its role changed since the previous launch.
+    try {
+      const cached = Auth.getCurrent();
+      const fresh = await DB.getCurrentUser(cached.id);
+      if (!fresh?.id) {
+        Auth.clear();
+        _setupLogin('انتهت الجلسة أو لم يعد الحساب موجودًا. سجل الدخول مرة أخرى.');
+        return;
+      }
+      Auth.set({ ...cached, ...fresh }, Auth.isRemembered());
+    } catch (err) {
+      _setupLogin(err.message || 'تعذر التحقق من جلسة الدخول');
       return;
     }
     _enterApp();
@@ -93,7 +109,7 @@ const App = (() => {
   }
 
   /* ── LOGIN ── */
-  function _setupLogin() {
+  function _setupLogin(initialError = '') {
     const loginScreen = document.getElementById('loginScreen');
     const splash = document.getElementById('splashScreen');
     const appShell = document.getElementById('appShell');
@@ -103,6 +119,11 @@ const App = (() => {
     _applyBranding();
 
     const form = document.getElementById('loginForm');
+    if (initialError) {
+      const box=document.getElementById('loginError'), text=document.getElementById('loginErrorText');
+      if(text) text.textContent=initialError;
+      box?.classList.remove('hidden');
+    }
     if (!form || form.dataset.bound === '1') {
       document.getElementById('loginUsername')?.focus();
       return;
@@ -118,6 +139,7 @@ const App = (() => {
     const btnSpin = document.querySelector('.btn-login-spin');
     const errBox = document.getElementById('loginError');
     const errText = document.getElementById('loginErrorText');
+    let loginInFlight = false;
 
     const savedUser = Auth.lastUsername();
     if (savedUser && usernameInp) {
@@ -159,23 +181,28 @@ const App = (() => {
 
     form.addEventListener('submit', async e => {
       e.preventDefault();
+      if (loginInFlight) return;
       const username = usernameInp.value.trim();
       const password = passwordInp.value;
       if (!username || !password) {
         showErr('يرجى إدخال اسم المستخدم وكلمة المرور');
         return;
       }
+      loginInFlight = true;
       setLoading(true);
       errBox.classList.add('hidden');
       try {
         const user = await DB.login(username, password);
         if (!user || !user.id) throw new Error('فشل تسجيل الدخول');
         Auth.set(user, rememberMe.checked);
+        passwordInp.value = '';
         setLoading(false);
+        loginInFlight = false;
         Toast.ok(`مرحباً ${user.fullName || user.username}`);
         setTimeout(() => _enterApp(), 250);
       } catch (err) {
         setLoading(false);
+        loginInFlight = false;
         showErr(err.message || 'فشل تسجيل الدخول');
         passwordInp.value = '';
         passwordInp.focus();

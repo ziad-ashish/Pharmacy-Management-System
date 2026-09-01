@@ -381,7 +381,7 @@ const AccountsPage = (() => {
               <td>${Fmt.money(s.opening_cash||0)}</td>
               <td>${Fmt.money(s.closing_cash||0)}</td>
               <td style="color:var(--teal-600)">${Fmt.money(s.sales_total||0)}</td>
-              <td style="color:${Math.abs(s.difference||0)<0.01?'var(--ok)':s.difference>0?'var(--ok)':'var(--err)';font-weight:700}">
+              <td style="color:${Math.abs(s.difference||0)<0.01?'var(--ok)':s.difference>0?'var(--ok)':'var(--err)'};font-weight:700">
                 ${s.status==='مفتوحة'?'—':(s.difference>0?'+':'')+Fmt.money(s.difference||0)}
               </td>
               <td><span class="badge ${s.status==='مفتوحة'?'bdg-warn':'bdg-ok'}">${s.status}</span></td>

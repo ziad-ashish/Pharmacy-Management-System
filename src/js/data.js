@@ -21,8 +21,11 @@ async function _api(method, options = {}) {
     url += '?' + q.toString();
   }
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 12000);
   const fetchOpts = {
     headers: { 'Content-Type': 'application/json' },
+    signal: controller.signal,
   };
 
   if (body !== null) {
@@ -32,10 +35,19 @@ async function _api(method, options = {}) {
     fetchOpts.method = 'GET';
   }
 
-  const res    = await fetch(url, fetchOpts);
-  const parsed = await res.json();
+  let res, parsed;
+  try {
+    res = await fetch(url, fetchOpts);
+    parsed = await res.json();
+  } catch (err) {
+    if (err?.name === 'AbortError') throw new Error('انتهت مهلة الاتصال بالخادم. حاول مرة أخرى.');
+    throw new Error('تعذر الاتصال بخادم الصيدلية. تأكد أن البرنامج يعمل ثم حاول مرة أخرى.');
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
-  if (!parsed.ok) throw new Error(parsed.error || 'Server error');
+  if (!res.ok) throw new Error(parsed?.error || `خطأ في الخادم (${res.status})`);
+  if (!parsed.ok) throw new Error(parsed.error || 'تعذر إتمام العملية');
   return parsed.data;
 }
 
@@ -227,10 +239,10 @@ const _LS = (() => {
     getAuditLog: () => Promise.resolve({items:[],total:0}),
 
     login: (username, password) => {
+      username = String(username || '').trim().toLowerCase();
       const users = lsGet('ph_users');
-      const user  = users.find(u=>u.username===username);
-      if (!user) return Promise.reject(new Error('اسم المستخدم غير صحيح'));
-      if (user.password !== password) return Promise.reject(new Error('كلمة المرور غير صحيحة'));
+      const user  = users.find(u=>String(u.username||'').trim().toLowerCase()===username);
+      if (!user || user.password !== password) return Promise.reject(new Error('اسم المستخدم أو كلمة المرور غير صحيحة'));
       const u={...user}; delete u.password;
       u.last_login=new Date().toISOString();
       u.is_default_password = ['admin123','123456'].includes(password);
