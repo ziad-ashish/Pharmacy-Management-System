@@ -21,7 +21,7 @@
 #  [3.16] audit_log table + get_audit_log
 # ══════════════════════════════════════════════════════════════
 
-import sqlite3, json, os, uuid, hashlib, hmac, secrets, shutil
+import sqlite3, json, os, uuid, hashlib, hmac, secrets, shutil, csv, io
 from datetime import datetime, date, timedelta
 
 DB_PATH     = os.path.join(os.path.dirname(__file__), "pharmacy.db")
@@ -46,6 +46,18 @@ def _ok(data=None): return json.dumps({"ok": True,  "data": data}, ensure_ascii=
 def _err(msg: str): return json.dumps({"ok": False, "error": msg}, ensure_ascii=False)
 
 def _new_id(prefix: str): return f"{prefix}-{uuid.uuid4().hex[:6].upper()}"
+
+def auto_backup():
+    """إنشاء لقطة SQLite سليمة؛ قابلة للاستدعاء من خيط الخلفية والاختبارات."""
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    dest = os.path.join(BACKUP_DIR, f"auto_pharmacy_{ts}.db")
+    src, dst = sqlite3.connect(DB_PATH), sqlite3.connect(dest)
+    try:
+        src.backup(dst)
+    finally:
+        src.close(); dst.close()
+    return dest
 
 
 # ── FIX [1.6]: atomic invoice numbering ───────────────────────
@@ -286,6 +298,34 @@ def init_db():
         total    REAL
     );
 
+    CREATE TABLE IF NOT EXISTS prescriptions (
+        id                TEXT PRIMARY KEY,
+        patient_id        TEXT,
+        doctor_name       TEXT NOT NULL,
+        doctor_license    TEXT NOT NULL,
+        prescription_type TEXT NOT NULL,
+        sale_id           TEXT UNIQUE REFERENCES sales(id) ON DELETE CASCADE,
+        date              TEXT NOT NULL,
+        image_data        TEXT,
+        created_by        TEXT,
+        created_at        TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS debts (
+        id TEXT PRIMARY KEY, patient_id TEXT, sale_id TEXT UNIQUE REFERENCES sales(id),
+        amount REAL NOT NULL, paid_amount REAL DEFAULT 0, due_date TEXT,
+        status TEXT DEFAULT 'مستحق', notes TEXT, created_at TEXT, updated_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS medicine_batches (
+        id TEXT PRIMARY KEY, medicine_id TEXT NOT NULL REFERENCES medicines(id),
+        batch_number TEXT, expiry TEXT, qty INTEGER DEFAULT 0, cost REAL DEFAULT 0, received_date TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS loyalty_points (
+        patient_id TEXT PRIMARY KEY, points REAL DEFAULT 0, last_updated TEXT
+    );
+
     CREATE TABLE IF NOT EXISTS users (
         id          TEXT PRIMARY KEY,
         username    TEXT UNIQUE NOT NULL,
@@ -317,6 +357,10 @@ def init_db():
     CREATE INDEX IF NOT EXISTS idx_sales_year_seq ON sales(invoice_year, invoice_seq);
     CREATE INDEX IF NOT EXISTS idx_items_sale     ON sale_items(sale_id);
     CREATE INDEX IF NOT EXISTS idx_items_med      ON sale_items(med_id);
+    CREATE INDEX IF NOT EXISTS idx_rx_date        ON prescriptions(date);
+    CREATE INDEX IF NOT EXISTS idx_rx_patient     ON prescriptions(patient_id);
+    CREATE INDEX IF NOT EXISTS idx_debts_status   ON debts(status,due_date);
+    CREATE INDEX IF NOT EXISTS idx_batches_fefo   ON medicine_batches(medicine_id,expiry);
     CREATE INDEX IF NOT EXISTS idx_audit_ts       ON audit_log(timestamp);
     CREATE INDEX IF NOT EXISTS idx_audit_entity   ON audit_log(entity, entity_id);
     """)
@@ -338,8 +382,27 @@ def init_db():
     _add_col("medicines", "company_barcode",   "TEXT")   # باركود الشركة المصنّعة
     _add_col("medicines", "pharmacy_barcode",  "TEXT")   # باركود الصيدلية الداخلي
     _add_col("medicines", "image_data",        "TEXT")   # صورة المنتج (base64)
+    _add_col("medicines", "controlled",        "INTEGER DEFAULT 0")
+    _add_col("medicines", "purchase_unit",     "TEXT")
+    _add_col("medicines", "sale_unit",         "TEXT")
+    _add_col("medicines", "conversion_factor", "INTEGER DEFAULT 1")
     _add_col("patients",  "is_active",    "INTEGER DEFAULT 1")
+    _add_col("patients",  "insurance_company", "TEXT")
+    _add_col("patients",  "policy_number",     "TEXT")
+    _add_col("patients",  "coverage_pct",      "REAL DEFAULT 0")
     _add_col("suppliers", "is_active",    "INTEGER DEFAULT 1")
+    _add_col("cash_sessions", "card_total",     "REAL DEFAULT 0")
+    _add_col("cash_sessions", "transfer_total", "REAL DEFAULT 0")
+    _add_col("cash_sessions", "credit_total",   "REAL DEFAULT 0")
+    _add_col("cash_sessions", "actual_card",    "REAL DEFAULT 0")
+    _add_col("cash_sessions", "actual_transfer","REAL DEFAULT 0")
+    _add_col("cash_sessions", "actual_credit",  "REAL DEFAULT 0")
+    _add_col("sales", "insurance_amount", "REAL DEFAULT 0")
+    _add_col("sales", "patient_amount",   "REAL DEFAULT 0")
+    _add_col("sales", "loyalty_discount", "REAL DEFAULT 0")
+    con.execute("UPDATE medicines SET purchase_unit=COALESCE(NULLIF(purchase_unit,''),unit,'علبة')")
+    con.execute("UPDATE medicines SET sale_unit=COALESCE(NULLIF(sale_unit,''),unit,'قرص')")
+    con.execute("UPDATE medicines SET conversion_factor=1 WHERE conversion_factor IS NULL OR conversion_factor<1")
     # back-fill invoice_seq / invoice_year
     needs_fill = con.execute(
         "SELECT COUNT(*) FROM sales WHERE invoice_seq=0 AND invoice_num IS NOT NULL"
@@ -504,12 +567,14 @@ class PharmacyAPI:
         con.close(); return _ok(dict(row) if row else None)
 
     def get_medicine_by_barcode(self, barcode: str):
-        """البحث عن دواء بالباركود (باركود الشركة أو باركود الصيدلية أو الباركود العادي)"""
+        """أولوية المطابقة: باركود الصيدلية ثم الشركة ثم الباركود القديم."""
         con = _conn()
         row = con.execute(
-            "SELECT * FROM medicines WHERE is_active=1 AND ("
-            "barcode=? OR company_barcode=? OR pharmacy_barcode=?)",
-            (barcode, barcode, barcode)
+            "SELECT * FROM medicines WHERE is_active=1 AND "
+            "(pharmacy_barcode=? OR company_barcode=? OR barcode=?) "
+            "ORDER BY CASE WHEN pharmacy_barcode=? THEN 1 "
+            "WHEN company_barcode=? THEN 2 ELSE 3 END LIMIT 1",
+            (barcode, barcode, barcode, barcode, barcode)
         ).fetchone()
         con.close(); return _ok(dict(row) if row else None)
 
@@ -548,13 +613,16 @@ class PharmacyAPI:
             nid = _new_id("M")
             con.execute(
                 "INSERT INTO medicines(id,name,scientific_name,manufacturer,batch_number,category,price,cost,stock,min_stock,"
-                "unit,supplier_id,expiry,barcode,company_barcode,pharmacy_barcode,location,description,image_data,is_active)"
-                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)",
+                "unit,supplier_id,expiry,barcode,company_barcode,pharmacy_barcode,location,description,image_data,"
+                "controlled,purchase_unit,sale_unit,conversion_factor,is_active)"
+                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)",
                 (nid, d.get("name"), d.get("scientific_name"), d.get("manufacturer"), d.get("batch_number"), d.get("category"), d.get("price",0),
                  d.get("cost",0), d.get("stock",0), d.get("min_stock",10),
                  d.get("unit","قرص"), d.get("supplier_id"), d.get("expiry"),
                  barcode or None, company_barcode or None, pharmacy_barcode or None,
-                 d.get("location"), d.get("description"), d.get("image_data"))
+                 d.get("location"), d.get("description"), d.get("image_data"),
+                 1 if d.get("controlled") else 0, d.get("purchase_unit") or d.get("unit") or "علبة",
+                 d.get("sale_unit") or d.get("unit") or "قرص", max(1, int(d.get("conversion_factor") or 1)))
             )
             _audit(con, user_id, "ADD", "medicine", nid, d.get("name",""))
             con.commit(); con.close(); return _ok(nid)
@@ -597,13 +665,15 @@ class PharmacyAPI:
             con.execute(
                 "UPDATE medicines SET name=?,scientific_name=?,manufacturer=?,batch_number=?,category=?,price=?,cost=?,stock=?,"
                 "min_stock=?,unit=?,supplier_id=?,expiry=?,barcode=?,company_barcode=?,pharmacy_barcode=?,"
-                "location=?,description=?,image_data=?"
+                "location=?,description=?,image_data=?,controlled=?,purchase_unit=?,sale_unit=?,conversion_factor=?"
                 " WHERE id=?",
                 (d.get("name"), d.get("scientific_name"), d.get("manufacturer"), d.get("batch_number"),
                  d.get("category"), d.get("price"), d.get("cost"),
                  d.get("stock"), d.get("min_stock"), d.get("unit"), d.get("supplier_id"),
                  d.get("expiry"), barcode or None, company_barcode or None, pharmacy_barcode or None,
-                 d.get("location"), d.get("description"), d.get("image_data"), mid)
+                 d.get("location"), d.get("description"), d.get("image_data"),
+                 1 if d.get("controlled") else 0, d.get("purchase_unit") or d.get("unit") or "علبة",
+                 d.get("sale_unit") or d.get("unit") or "قرص", max(1, int(d.get("conversion_factor") or 1)), mid)
             )
             details = ""
             if old_price and old_price != d.get("price"):
@@ -674,10 +744,10 @@ class PharmacyAPI:
             nid = _new_id("P")
             con.execute(
                 "INSERT INTO patients(id,name,phone,age,gender,blood_type,allergies,"
-                "chronic_diseases,address,notes,created_at,is_active) VALUES(?,?,?,?,?,?,?,?,?,?,?,1)",
+                "chronic_diseases,address,notes,created_at,insurance_company,policy_number,coverage_pct,is_active) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)",
                 (nid, d.get("name"), d.get("phone"), d.get("age"), d.get("gender"),
                  d.get("blood_type"), d.get("allergies"), d.get("chronic_diseases"),
-                 d.get("address"), d.get("notes"), date.today().isoformat())
+                 d.get("address"), d.get("notes"), date.today().isoformat(),d.get("insurance_company"),d.get("policy_number"),d.get("coverage_pct",0))
             )
             _audit(con, user_id, "ADD", "patient", nid, d.get("name",""))
             con.commit(); con.close(); return _ok(nid)
@@ -688,10 +758,10 @@ class PharmacyAPI:
             d, con = json.loads(data), _conn()
             con.execute(
                 "UPDATE patients SET name=?,phone=?,age=?,gender=?,blood_type=?,"
-                "allergies=?,chronic_diseases=?,address=?,notes=? WHERE id=?",
+                "allergies=?,chronic_diseases=?,address=?,notes=?,insurance_company=?,policy_number=?,coverage_pct=? WHERE id=?",
                 (d.get("name"), d.get("phone"), d.get("age"), d.get("gender"),
                  d.get("blood_type"), d.get("allergies"), d.get("chronic_diseases"),
-                 d.get("address"), d.get("notes"), pid)
+                 d.get("address"), d.get("notes"),d.get("insurance_company"),d.get("policy_number"),d.get("coverage_pct",0), pid)
             )
             _audit(con, user_id, "UPDATE", "patient", pid, d.get("name",""))
             con.commit(); con.close(); return _ok()
@@ -816,9 +886,10 @@ class PharmacyAPI:
 
             # ── FIX [1.2]: validate stock for ALL items before any INSERT ──
             items = d.get("items", [])
+            controlled_items = []
             for item in items:
                 med_row = con.execute(
-                    "SELECT name, stock FROM medicines WHERE id=? AND is_active=1",
+                    "SELECT name, stock, controlled FROM medicines WHERE id=? AND is_active=1",
                     (item["medId"],)
                 ).fetchone()
                 if not med_row:
@@ -830,6 +901,16 @@ class PharmacyAPI:
                         f"المخزون غير كافٍ للدواء '{med_row['name']}': "
                         f"المتاح {med_row['stock']}، المطلوب {item['qty']}"
                     )
+                if med_row["controlled"]:
+                    controlled_items.append(med_row["name"])
+
+            prescription = d.get("prescription") or {}
+            if controlled_items:
+                missing = [key for key in ("doctor_name", "doctor_license", "prescription_type")
+                           if not str(prescription.get(key, "")).strip()]
+                if missing:
+                    con.rollback(); con.close()
+                    return _err("لا يمكن بيع دواء خاضع للرقابة بدون روشتة مكتملة: " + "، ".join(controlled_items))
 
             nid = _new_id("SL")
             inv, seq, yr = _next_invoice(con)   # safe inside IMMEDIATE
@@ -837,16 +918,38 @@ class PharmacyAPI:
             s_date = now.strftime("%Y-%m-%d")
             s_time = now.strftime("%H:%M")
 
+            total_due = float(d.get("total", 0) or 0)
+            insurance_amount = 0.0
+            patient_amount = total_due
+            if d.get("patient_id"):
+                patient_row = con.execute("SELECT coverage_pct FROM patients WHERE id=?", (d.get("patient_id"),)).fetchone()
+                coverage = max(0, min(100, float(patient_row["coverage_pct"] or 0))) if patient_row else 0
+                insurance_amount = round(total_due * coverage / 100, 2)
+                patient_amount = round(total_due - insurance_amount, 2)
+            loyalty_discount = 0.0
+            if d.get("use_loyalty") and d.get("patient_id"):
+                lp = con.execute("SELECT points FROM loyalty_points WHERE patient_id=?", (d.get("patient_id"),)).fetchone()
+                valrow = con.execute("SELECT value FROM settings WHERE key='loyalty_point_value'").fetchone()
+                point_value = max(0, float(valrow[0] if valrow else 1))
+                available = float(lp["points"] if lp else 0)
+                loyalty_discount = round(min(patient_amount, available * point_value), 2)
+                used_points = loyalty_discount / point_value if point_value else 0
+                if used_points:
+                    con.execute("UPDATE loyalty_points SET points=MAX(0,points-?),last_updated=? WHERE patient_id=?",
+                                (used_points,now.isoformat(),d.get("patient_id")))
+                    patient_amount = round(patient_amount-loyalty_discount,2)
+                    total_due = round(total_due-loyalty_discount,2)
+
             con.execute(
                 "INSERT INTO sales(id,invoice_num,invoice_seq,invoice_year,"
                 "patient_id,patient_name,subtotal,discount,tax,total,"
-                "payment_method,cashier,sale_date,sale_time,status)"
-                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "payment_method,cashier,sale_date,sale_time,status,insurance_amount,patient_amount,loyalty_discount)"
+                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (nid, inv, seq, yr,
                  d.get("patient_id"), d.get("patient_name"),
-                 d.get("subtotal"), d.get("discount",0), d.get("tax",0), d.get("total"),
+                 d.get("subtotal"), d.get("discount",0), d.get("tax",0), total_due,
                  d.get("payment_method","نقدي"), d.get("cashier",""),
-                 s_date, s_time, "مكتمل")
+                 s_date, s_time, "مكتمل",insurance_amount,patient_amount,loyalty_discount)
             )
             for item in items:
                 con.execute(
@@ -859,13 +962,157 @@ class PharmacyAPI:
                     "UPDATE medicines SET stock = stock - ? WHERE id=?",
                     (item["qty"], item["medId"])
                 )
+                # FEFO: الخصم من أقرب دفعة انتهاءً أولاً إن كانت الدفعات مسجلة.
+                remaining = int(item["qty"])
+                batches = con.execute(
+                    "SELECT id,qty FROM medicine_batches WHERE medicine_id=? AND qty>0 "
+                    "ORDER BY CASE WHEN expiry IS NULL OR expiry='' THEN 1 ELSE 0 END, expiry, received_date",
+                    (item["medId"],)
+                ).fetchall()
+                for batch in batches:
+                    if remaining <= 0: break
+                    take = min(remaining, int(batch["qty"]))
+                    con.execute("UPDATE medicine_batches SET qty=qty-? WHERE id=?", (take, batch["id"]))
+                    remaining -= take
+            if prescription:
+                rx_id = _new_id("RX")
+                con.execute(
+                    "INSERT INTO prescriptions(id,patient_id,doctor_name,doctor_license,prescription_type,"
+                    "sale_id,date,image_data,created_by,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                    (rx_id, d.get("patient_id"), str(prescription.get("doctor_name", "")).strip(),
+                     str(prescription.get("doctor_license", "")).strip(),
+                     str(prescription.get("prescription_type", "عادية")).strip(), nid,
+                     prescription.get("date") or s_date, prescription.get("image_data"),
+                     user_id or "system", now.isoformat())
+                )
+                _audit(con, user_id, "ADD_PRESCRIPTION", "prescription", rx_id, f"فاتورة {inv}")
+            if d.get("payment_method") == "آجل":
+                if not d.get("patient_id"):
+                    con.rollback(); con.close(); return _err("البيع الآجل يتطلب اختيار مريض")
+                debt_id = _new_id("DEBT")
+                con.execute(
+                    "INSERT INTO debts(id,patient_id,sale_id,amount,paid_amount,due_date,status,notes,created_at,updated_at) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?)",
+                    (debt_id,d.get("patient_id"),nid,patient_amount,0,d.get("due_date") or (date.today()+timedelta(days=30)).isoformat(),
+                     "مستحق",d.get("debt_notes",""),now.isoformat(),now.isoformat())
+                )
+                _audit(con,user_id,"ADD_DEBT","debt",debt_id,inv)
+
+            # نقاط ولاء قابلة للتخصيص (الافتراضي نقطة لكل 100 من العملة).
+            if d.get("patient_id"):
+                setting = con.execute("SELECT value FROM settings WHERE key='loyalty_amount_per_point'").fetchone()
+                threshold = max(1, float(setting[0] if setting else 100))
+                earned = patient_amount / threshold
+                con.execute("INSERT INTO loyalty_points(patient_id,points,last_updated) VALUES(?,?,?) "
+                            "ON CONFLICT(patient_id) DO UPDATE SET points=points+excluded.points,last_updated=excluded.last_updated",
+                            (d.get("patient_id"),earned,now.isoformat()))
             _audit(con, user_id, "ADD_SALE", "sale", nid, inv)
             con.commit(); con.close()
-            return _ok({"id": nid, "invoiceNum": inv, "date": s_date, "time": s_time})
+            return _ok({"id": nid, "invoiceNum": inv, "date": s_date, "time": s_time,
+                        "total":total_due,"patientAmount":patient_amount,"insuranceAmount":insurance_amount,
+                        "loyaltyDiscount":loyalty_discount})
         except Exception as e:
             try: con.rollback(); con.close()
             except Exception: pass
             return _err(str(e))
+
+    def get_prescriptions_report(self, month: str = ""):
+        """تقرير الفواتير المرتبطة بروشتات لشهر YYYY-MM."""
+        month = (month or date.today().strftime("%Y-%m"))[:7]
+        con = _conn()
+        rows = _rows(con.execute(
+            "SELECT p.*,s.invoice_num,s.patient_name,s.total,s.payment_method,s.cashier "
+            "FROM prescriptions p JOIN sales s ON s.id=p.sale_id "
+            "WHERE substr(p.date,1,7)=? ORDER BY p.date DESC,s.sale_time DESC", (month,)
+        ))
+        con.close()
+        return _ok({"month": month, "count": len(rows), "items": rows})
+
+    def get_top_selling_meds(self, limit: int = 50):
+        con = _conn()
+        rows = _rows(con.execute(
+            "SELECT m.*,COALESCE(SUM(CASE WHEN s.status='مكتمل' THEN si.qty ELSE 0 END),0) sold_qty "
+            "FROM medicines m LEFT JOIN sale_items si ON si.med_id=m.id LEFT JOIN sales s ON s.id=si.sale_id "
+            "WHERE m.is_active=1 GROUP BY m.id ORDER BY sold_qty DESC,m.name LIMIT ?", (max(1,min(int(limit),500)),)
+        ))
+        con.close(); return _ok(rows)
+
+    def search_medicines(self, query: str):
+        q = f"%{(query or '').strip()}%"
+        con = _conn()
+        rows = _rows(con.execute(
+            "SELECT * FROM medicines WHERE is_active=1 AND (name LIKE ? OR scientific_name LIKE ? OR "
+            "pharmacy_barcode LIKE ? OR company_barcode LIKE ? OR barcode LIKE ?) ORDER BY name LIMIT 100",
+            (q,q,q,q,q)
+        ))
+        con.close(); return _ok(rows)
+
+    def get_debts(self, overdue_only: bool = False):
+        con=_conn(); where="WHERE d.status!='مسدد'"
+        if overdue_only: where += " AND d.due_date<date('now')"
+        rows=_rows(con.execute(
+            f"SELECT d.*,p.name patient_name,p.phone FROM debts d LEFT JOIN patients p ON p.id=d.patient_id {where} ORDER BY d.due_date,d.created_at DESC"))
+        con.close(); return _ok(rows)
+
+    def pay_debt(self, debt_id: str, amount: float, user_id: str = None):
+        try:
+            amount=float(amount); con=_conn()
+            row=con.execute("SELECT * FROM debts WHERE id=?",(debt_id,)).fetchone()
+            if not row: con.close(); return _err("سجل الدين غير موجود")
+            remaining=float(row["amount"])-float(row["paid_amount"])
+            if amount<=0 or amount>remaining: con.close(); return _err("قيمة الدفعة غير صحيحة")
+            paid=float(row["paid_amount"])+amount; status="مسدد" if paid>=float(row["amount"]) else "مسدد جزئياً"
+            con.execute("UPDATE debts SET paid_amount=?,status=?,updated_at=? WHERE id=?",(paid,status,datetime.now().isoformat(),debt_id))
+            _audit(con,user_id,"PAY_DEBT","debt",debt_id,f"دفعة {amount} — {status}")
+            con.commit(); con.close(); return _ok({"paid_amount":paid,"status":status})
+        except Exception as e: return _err(str(e))
+
+    def get_patient_debt(self, patient_id: str):
+        con=_conn(); row=con.execute("SELECT COALESCE(SUM(amount-paid_amount),0) balance FROM debts WHERE patient_id=? AND status!='مسدد'",(patient_id,)).fetchone(); con.close()
+        return _ok({"balance":float(row["balance"] or 0)})
+
+    def import_medicines(self, csv_text: str, user_id: str = None):
+        required={"name","scientific_name","category","barcode","price","cost","stock","unit","expiry","location","min_stock"}
+        saved=[]; rejected=[]
+        try:
+            reader=csv.DictReader(io.StringIO(csv_text or ""))
+            if not reader.fieldnames or not required.issubset(set(reader.fieldnames)):
+                return _err("أعمدة CSV غير مطابقة للقالب المطلوب")
+            con=_conn()
+            for line,row in enumerate(reader,start=2):
+                try:
+                    missing=[k for k in required if not str(row.get(k,"")).strip()]
+                    if missing: raise ValueError("بيانات ناقصة: "+"، ".join(missing))
+                    if con.execute("SELECT 1 FROM medicines WHERE barcode=? AND is_active=1",(row["barcode"].strip(),)).fetchone(): raise ValueError("باركود مكرر")
+                    mid=_new_id("M")
+                    con.execute("INSERT INTO medicines(id,name,scientific_name,category,barcode,price,cost,stock,unit,sale_unit,purchase_unit,conversion_factor,expiry,location,min_stock,is_active) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)",
+                                (mid,row["name"].strip(),row["scientific_name"].strip(),row["category"].strip(),row["barcode"].strip(),float(row["price"]),float(row["cost"]),int(row["stock"]),row["unit"].strip(),row["unit"].strip(),row["unit"].strip(),1,row["expiry"].strip(),row["location"].strip(),int(row["min_stock"])))
+                    saved.append({"line":line,"id":mid})
+                except Exception as exc: rejected.append({"line":line,"reason":str(exc)})
+            _audit(con,user_id,"IMPORT_CSV","medicine","bulk",f"محفوظ {len(saved)}، مرفوض {len(rejected)}")
+            con.commit(); con.close(); return _ok({"saved":len(saved),"rejected":len(rejected),"errors":rejected})
+        except Exception as e: return _err(str(e))
+
+    def get_turnover_report(self, days: int = 30):
+        days=max(1,min(int(days),365)); con=_conn()
+        rows=_rows(con.execute(
+            "SELECT m.id,m.name,m.stock,COALESCE(SUM(CASE WHEN s.sale_date>=date('now',?) AND s.status='مكتمل' THEN si.qty ELSE 0 END),0) sold "
+            "FROM medicines m LEFT JOIN sale_items si ON si.med_id=m.id LEFT JOIN sales s ON s.id=si.sale_id "
+            "WHERE m.is_active=1 GROUP BY m.id ORDER BY sold DESC",(f'-{days} days',)))
+        for r in rows:
+            avg=max(1,float(r["stock"])+float(r["sold"])/2); r["turnover_rate"]=round(float(r["sold"])/avg*30/days,3)
+            r["classification"]="سريع" if r["turnover_rate"]>=1 else ("راكد" if r["turnover_rate"]<0.2 else "متوسط")
+        con.close(); return _ok(rows)
+
+    def get_loyalty(self, patient_id: str):
+        con=_conn(); row=con.execute("SELECT points,last_updated FROM loyalty_points WHERE patient_id=?",(patient_id,)).fetchone(); con.close()
+        return _ok(dict(row) if row else {"points":0,"last_updated":None})
+
+    def get_insurance_report(self, month: str = ""):
+        month=(month or date.today().strftime("%Y-%m"))[:7]; con=_conn()
+        rows=_rows(con.execute("SELECT s.invoice_num,s.sale_date,s.patient_name,s.total,s.insurance_amount,s.patient_amount,p.insurance_company,p.policy_number FROM sales s LEFT JOIN patients p ON p.id=s.patient_id WHERE s.status='مكتمل' AND substr(s.sale_date,1,7)=? AND s.insurance_amount>0 ORDER BY s.sale_date DESC",(month,)))
+        total=sum(float(r["insurance_amount"] or 0) for r in rows); con.close()
+        return _ok({"month":month,"total":round(total,2),"items":rows})
 
     def void_sale(self, sale_id: str, user_id: str = None):
         # FIX [1.4]: void invoice and restore stock
@@ -1165,6 +1412,19 @@ class PharmacyAPI:
             src.backup(dst)
             src.close(); dst.close()
             return _ok({"path": dest, "filename": os.path.basename(dest)})
+        except Exception as e: return _err(str(e))
+
+    def get_backup_status(self):
+        try:
+            os.makedirs(BACKUP_DIR, exist_ok=True)
+            paths = [os.path.join(BACKUP_DIR, f) for f in os.listdir(BACKUP_DIR) if f.endswith(".db")]
+            if not paths:
+                return _ok({"last_backup": None, "age_days": None, "stale": True})
+            latest = max(paths, key=os.path.getmtime)
+            modified = datetime.fromtimestamp(os.path.getmtime(latest))
+            age_days = (datetime.now() - modified).total_seconds() / 86400
+            return _ok({"last_backup": modified.isoformat(), "age_days": round(age_days, 2),
+                        "stale": age_days >= 3, "filename": os.path.basename(latest)})
         except Exception as e: return _err(str(e))
 
     def restore_database(self, backup_path: str):
@@ -1487,16 +1747,27 @@ class PharmacyAPI:
                 )
                 # تحديث المخزون
                 if item_row["med_id"]:
+                    med_units = con.execute(
+                        "SELECT conversion_factor,batch_number,expiry FROM medicines WHERE id=?", (item_row["med_id"],)
+                    ).fetchone()
+                    factor = max(1, int((med_units["conversion_factor"] if med_units else 1) or 1))
+                    stock_qty = qty * factor
                     con.execute(
                         "UPDATE medicines SET stock=stock+? WHERE id=?",
-                        (qty, item_row["med_id"])
+                        (stock_qty, item_row["med_id"])
                     )
-                    # تحديث سعر التكلفة لو مختلف
+                    con.execute(
+                        "INSERT INTO medicine_batches(id,medicine_id,batch_number,expiry,qty,cost,received_date) VALUES(?,?,?,?,?,?,?)",
+                        (_new_id("BAT"),item_row["med_id"],item.get("batch_number") or med_units["batch_number"],
+                         item.get("expiry") or med_units["expiry"],stock_qty,
+                         float(item.get("unit_cost") or item_row["unit_cost"] or 0)/factor,date.today().isoformat())
+                    )
+                    # سعر أمر الشراء لوحدة الشراء؛ نخزن تكلفة وحدة البيع.
                     new_cost = item.get("unit_cost")
                     if new_cost:
                         con.execute(
                             "UPDATE medicines SET cost=? WHERE id=?",
-                            (new_cost, item_row["med_id"])
+                            (float(new_cost) / factor, item_row["med_id"])
                         )
 
             # تحقق إذا كل الأصناف استُلمت
@@ -1513,7 +1784,7 @@ class PharmacyAPI:
                 (new_status, now, pid)
             )
             _audit(con, user_id, "RECEIVE", "purchase", pid,
-                   f"{po['po_num']} — {new_status}")
+                   f"{po['po_num']} — {new_status} — تم تحويل وحدات الشراء إلى وحدات البيع")
             con.commit(); con.close()
             return _ok({"status": new_status})
         except Exception as e: return _err(str(e))
@@ -1710,23 +1981,26 @@ class PharmacyAPI:
                 con.close(); return _err("الجلسة مغلقة بالفعل")
 
             # حساب مبيعات النقد خلال الجلسة
-            sales_total = con.execute(
-                "SELECT COALESCE(SUM(total),0) FROM sales "
-                "WHERE status='مكتمل' AND payment_method='نقدي' "
-                "AND sale_date=?",
+            payment_rows = con.execute(
+                "SELECT payment_method,COALESCE(SUM(total),0) total FROM sales "
+                "WHERE status='مكتمل' AND sale_date=? GROUP BY payment_method",
                 (date.today().isoformat(),)
-            ).fetchone()[0]
+            ).fetchall()
+            totals={r["payment_method"]:float(r["total"] or 0) for r in payment_rows}
+            sales_total=totals.get("نقدي",0); card_total=totals.get("بطاقة",0)
+            transfer_total=totals.get("تحويل",0); credit_total=totals.get("آجل",0)
 
             opening = session["opening_cash"] or 0
             closing = float(d.get("closing_cash", 0))
+            actual_card=float(d.get("actual_card",card_total)); actual_transfer=float(d.get("actual_transfer",transfer_total)); actual_credit=float(d.get("actual_credit",credit_total))
             expected = opening + sales_total
             diff = closing - expected
             now = datetime.now().isoformat()
 
             con.execute(
                 "UPDATE cash_sessions SET closed_by=?,closed_at=?,closing_cash=?,"
-                "expected_cash=?,difference=?,sales_total=?,status='مغلقة' WHERE id=?",
-                (user_id, now, closing, expected, diff, sales_total, sid)
+                "expected_cash=?,difference=?,sales_total=?,card_total=?,transfer_total=?,credit_total=?,actual_card=?,actual_transfer=?,actual_credit=?,status='مغلقة' WHERE id=?",
+                (user_id, now, closing, expected, diff, sales_total,card_total,transfer_total,credit_total,actual_card,actual_transfer,actual_credit,sid)
             )
             _audit(con, user_id, "CLOSE_SESSION", "cash_session", sid,
                    f"فرق={diff:.2f}")
@@ -1736,6 +2010,10 @@ class PharmacyAPI:
                 "expected": round(expected, 2),
                 "closing": round(closing, 2),
                 "difference": round(diff, 2),
+                "channels":{"cash":{"expected":round(expected,2),"actual":round(closing,2),"difference":round(diff,2)},
+                            "card":{"expected":round(card_total,2),"actual":round(actual_card,2),"difference":round(actual_card-card_total,2)},
+                            "transfer":{"expected":round(transfer_total,2),"actual":round(actual_transfer,2),"difference":round(actual_transfer-transfer_total,2)},
+                            "credit":{"expected":round(credit_total,2),"actual":round(actual_credit,2),"difference":round(actual_credit-credit_total,2)}},
             })
         except Exception as e: return _err(str(e))
 

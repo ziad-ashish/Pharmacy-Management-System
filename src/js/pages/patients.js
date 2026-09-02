@@ -221,6 +221,11 @@ const PatientsPage = (() => {
     </div>
     <div class="form-group"><label class="form-label">العنوان</label>
       <input class="form-control" id="fPtAddr" value="${p.address||''}" /></div>
+    <div class="form-row cols-3">
+      <div class="form-group"><label class="form-label">شركة التأمين</label><input class="form-control" id="fPtInsurance" value="${p.insuranceCompany||''}"></div>
+      <div class="form-group"><label class="form-label">رقم الوثيقة</label><input class="form-control" id="fPtPolicy" value="${p.policyNumber||''}"></div>
+      <div class="form-group"><label class="form-label">نسبة التغطية %</label><input class="form-control" id="fPtCoverage" type="number" min="0" max="100" value="${p.coveragePct||0}"></div>
+    </div>
     <div class="form-group"><label class="form-label">ملاحظات</label>
       <textarea class="form-control" id="fPtNotes" rows="2">${p.notes||''}</textarea></div>`;
   }
@@ -257,6 +262,9 @@ const PatientsPage = (() => {
       chronicDiseases: document.getElementById('fPtChronic')?.value.trim(),
       address:         document.getElementById('fPtAddr')?.value.trim(),
       notes:           document.getElementById('fPtNotes')?.value.trim(),
+      insuranceCompany:document.getElementById('fPtInsurance')?.value.trim(),
+      policyNumber:    document.getElementById('fPtPolicy')?.value.trim(),
+      coveragePct:     Math.max(0,Math.min(100,parseFloat(document.getElementById('fPtCoverage')?.value)||0)),
     };
     if(!v.name||!v.phone){Toast.err('بيانات ناقصة','الاسم والهاتف مطلوبان');return;}
     try {
@@ -285,6 +293,7 @@ const PatientsPage = (() => {
         <div class="detail-row"><span class="dr-label">الحساسية</span><span class="dr-val" style="color:${p.allergies&&p.allergies!=='لا يوجد'?'var(--err)':'inherit'}">${p.allergies||'—'}</span></div>
         <div class="detail-row"><span class="dr-label">الأمراض المزمنة</span><span class="dr-val">${p.chronicDiseases||'—'}</span></div>
         <div class="detail-row"><span class="dr-label">العنوان</span><span class="dr-val">${p.address||'—'}</span></div>
+        <div class="detail-row"><span class="dr-label">التأمين</span><span class="dr-val">${p.insuranceCompany?`${p.insuranceCompany} — تغطية ${p.coveragePct}%`:'لا يوجد'}</span></div>
         <div class="detail-row"><span class="dr-label">الملاحظات</span><span class="dr-val">${p.notes||'—'}</span></div>
         <div class="detail-row"><span class="dr-label">تاريخ التسجيل</span><span class="dr-val">${Fmt.date(p.createdAt)}</span></div>
         <div class="divider"></div>

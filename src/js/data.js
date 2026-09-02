@@ -119,13 +119,16 @@ const _LS = (() => {
       supplierId:m.supplier_id??m.supplierId??'', expiry:m.expiry??'',
       barcode:m.barcode??'', companyBarcode:m.company_barcode??m.companyBarcode??'',
       pharmacyBarcode:m.pharmacy_barcode??m.pharmacyBarcode??'',
+      controlled:Boolean(m.controlled), purchaseUnit:m.purchase_unit??m.purchaseUnit??m.unit??'علبة',
+      saleUnit:m.sale_unit??m.saleUnit??m.unit??'قرص', conversionFactor:+(m.conversion_factor??m.conversionFactor??1),
       location:m.location??'', description:m.description??'', imageData:m.image_data??m.imageData??'' };
   }
   function normPat(p) {
     return { id:p.id, name:p.name, phone:p.phone, age:+p.age, gender:p.gender??'',
       bloodType:p.blood_type??p.bloodType??'', allergies:p.allergies??'',
       chronicDiseases:p.chronic_diseases??p.chronicDiseases??'',
-      address:p.address??'', notes:p.notes??'', createdAt:p.created_at??p.createdAt??'' };
+      address:p.address??'', notes:p.notes??'', createdAt:p.created_at??p.createdAt??'',
+      insuranceCompany:p.insurance_company??p.insuranceCompany??'', policyNumber:p.policy_number??p.policyNumber??'', coveragePct:+(p.coverage_pct??p.coveragePct??0) };
   }
   function normSup(s) {
     return { id:s.id, name:s.name, contact:s.contact??'', phone:s.phone??'',
@@ -365,12 +368,15 @@ const DB = {
       stock:d.stock, min_stock:d.minStock, unit:d.unit, supplier_id:d.supplierId,
       expiry:d.expiry, barcode:d.barcode, company_barcode:d.companyBarcode??'',
       pharmacy_barcode:d.pharmacyBarcode??'', location:d.location,
-      description:d.description, image_data:d.imageData??null };
+      description:d.description, image_data:d.imageData??null, controlled:d.controlled?1:0,
+      purchase_unit:d.purchaseUnit||d.unit||'علبة', sale_unit:d.saleUnit||d.unit||'قرص',
+      conversion_factor:Math.max(1, Number(d.conversionFactor)||1) };
   },
   _toSnakePat(d) {
     return { name:d.name, phone:d.phone, age:d.age, gender:d.gender,
       blood_type:d.bloodType, allergies:d.allergies,
-      chronic_diseases:d.chronicDiseases, address:d.address, notes:d.notes };
+      chronic_diseases:d.chronicDiseases, address:d.address, notes:d.notes,
+      insurance_company:d.insuranceCompany??'',policy_number:d.policyNumber??'',coverage_pct:d.coveragePct??0 };
   },
   _toSnakeSup(d) {
     return { name:d.name, contact:d.contact, phone:d.phone, email:d.email,
@@ -411,6 +417,8 @@ const DB = {
   async getLowStock()       { return _IS_FLASK ? (await _api('get_low_stock')).map(m=>this._normMed(m)) : _LS.getLowStock(); },
   async getExpiring()       { return _IS_FLASK ? (await _api('get_expiring')).map(m=>this._normMed(m))  : _LS.getExpiring(); },
   async getCategories()     { return _IS_FLASK ? _api('get_categories') : _LS.getCategories(); },
+  async getTopSellingMeds(limit=50) { return _IS_FLASK ? (await _api(`get_top_selling_meds/${limit}`)).map(m=>this._normMed(m)) : (await _LS.getMedicines()).slice(0,limit); },
+  async searchMedicines(q)  { return _IS_FLASK ? (await _api('search_medicines',{params:{q}})).map(m=>this._normMed(m)) : (await _LS.getMedicines()).filter(m=>m.name.includes(q)); },
 
   /* ── PATIENTS ───────────────────────────────────────── */
   async getPatients()       { return _IS_FLASK ? (await _api('get_patients')).map(p=>this._normPat(p)) : _LS.getPatients(); },
@@ -448,7 +456,10 @@ const DB = {
   async getSales()          { return _IS_FLASK ? (await _api('get_sales')).map(s=>this._normSale(s)) : _LS.getSales(); },
   async getSale(id)         { return _IS_FLASK ? this._normSale(await _api(`get_sale/${id}`)) : _LS.getSale(id); },
   async addSale(data)       {
-    if (_IS_FLASK) return _api('add_sale', {body: this._withUser({...data})});
+    if (_IS_FLASK) return _api('add_sale', {body: this._withUser({...data,
+      patient_id:data.patientId??data.patient_id??null, patient_name:data.patientName??data.patient_name??'',
+      payment_method:data.paymentMethod??data.payment_method??'نقدي', use_loyalty:Boolean(data.useLoyalty??data.use_loyalty)
+    })});
     return _LS.addSale(data);
   },
   async voidSale(id)        {
@@ -513,6 +524,21 @@ const DB = {
   async getProfitReport(period='all') {
     return _IS_FLASK ? _api(`get_profit_report/${period}`) : _LS.getProfitReport();
   },
+  async getPrescriptionsReport(month='') {
+    return _IS_FLASK ? _api('get_prescriptions_report', {params:{month}}) : {month, count:0, items:[]};
+  },
+  async getTurnoverReport(days=30) { return _IS_FLASK ? _api('get_turnover_report',{params:{days}}) : []; },
+  async getDebts(overdue=false) { return _IS_FLASK ? _api('get_debts',{params:{overdue:overdue?'1':'0'}}) : []; },
+  async getPatientDebt(patientId) { return _IS_FLASK ? _api(`get_patient_debt/${patientId}`) : {balance:0}; },
+  async payDebt(id,amount) { return _IS_FLASK ? _api(`pay_debt/${id}`,{body:this._withUser({amount})}) : {}; },
+  async getLoyalty(patientId) { return _IS_FLASK ? _api(`get_loyalty/${patientId}`) : {points:0}; },
+  async getInsuranceReport(month='') { return _IS_FLASK ? _api('get_insurance_report',{params:{month}}) : {month,total:0,items:[]}; },
+  async importMedicinesCSV(file) {
+    if (!_IS_FLASK) throw new Error('الاستيراد متاح عند تشغيل الخادم فقط');
+    const form=new FormData(); form.append('file',file); form.append('__user_id',Auth?.getCurrent?.()?.id||'');
+    const res=await fetch('/api/import_medicines',{method:'POST',body:form}); const parsed=await res.json();
+    if(!res.ok||!parsed.ok) throw new Error(parsed.error||'فشل الاستيراد'); return parsed.data;
+  },
 
   /* ── SETTINGS ───────────────────────────────────────── */
   async getSetting(key)         { return _IS_FLASK ? _api(`get_setting/${key}`) : _LS.getSetting(key); },
@@ -522,6 +548,7 @@ const DB = {
   },
   async listBackups()           { return _IS_FLASK ? _api('list_backups') : _LS.listBackups(); },
   async backupDatabase()        { return _IS_FLASK ? _api('backup_database', {body:{}}) : {message:'غير متاح'}; },
+  async getBackupStatus()       { return _IS_FLASK ? _api('get_backup_status') : {stale:false}; },
   async restoreDatabase(path)   { return _IS_FLASK ? _api('restore_database', {body:{backup_path:path}}) : {}; },
   async getAuditLog(limit=100, offset=0) {
     return _IS_FLASK ? _api('get_audit_log', {params:{limit,offset}}) : _LS.getAuditLog();

@@ -5,12 +5,23 @@
 # ══════════════════════════════════════════════════════════════
 
 import os
+import threading
+import time
 import webview
 from flask import Flask
-from api import init_db, seed_if_empty
+from api import init_db, seed_if_empty, auto_backup
 from routes import register_routes
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+def _backup_worker():
+    """نسخة عند بدء التشغيل ثم كل 24 ساعة، بدون تعطيل واجهة الصيدلي."""
+    while True:
+        try:
+            auto_backup()
+        except Exception as exc:
+            print(f"[backup] تعذر إنشاء النسخة الاحتياطية: {exc}")
+        time.sleep(24 * 60 * 60)
 
 
 def create_app():
@@ -28,6 +39,7 @@ def create_app():
 def main():
     init_db()
     seed_if_empty()
+    threading.Thread(target=_backup_worker, name="pharmacy-auto-backup", daemon=True).start()
 
     app = create_app()
 
@@ -44,7 +56,7 @@ def main():
         background_color = "#0d2b2e",
     )
 
-    webview.start(debug=False)
+    webview.start(debug=True)
 
 
 if __name__ == "__main__":

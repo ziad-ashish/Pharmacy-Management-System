@@ -10,6 +10,8 @@ const SalesPage = (() => {
   let _catFilter = '';
   let _search    = '';
   let _allMeds   = [];
+  let _prescription = null;
+  let _useLoyalty = false;
   let _pharmacyName = 'صيدلية الشفاء';
   let _pharmacyLogo = '';
   let _invoiceNote  = 'شكراً لزيارتكم • صحة وعافية';
@@ -20,6 +22,8 @@ const SalesPage = (() => {
   let _barcodeBuf  = '';
   let _barcodeTimer = null;
   let _barcodeListenerAttached = false;
+  let _shortcutListenerAttached = false;
+  let _keyboardIndex = -1;
 
   function render() {
     return `
@@ -71,6 +75,11 @@ const SalesPage = (() => {
         <select class="form-control" id="posPatient" style="font-size:.8rem">
           <option value="">— عميل عادي —</option>
         </select>
+        <button class="btn btn-ghost btn-sm" id="addPrescriptionBtn" style="width:100%;margin-top:.5rem;justify-content:center">
+          <i class="fas fa-file-prescription"></i> إضافة روشتة
+        </button>
+        <div id="prescriptionStatus" style="display:none;margin-top:.45rem;font-size:.72rem;color:var(--green-600)"></div>
+        <label id="loyaltyOption" style="display:none;margin-top:.5rem;font-size:.75rem"><input type="checkbox" id="useLoyalty"> استخدام نقاط الولاء المتاحة</label>
       </div>
       <div class="cart-body" id="cartBody">
         <div class="cart-empty">
@@ -107,11 +116,11 @@ const SalesPage = (() => {
   }
 
   async function afterRender() {
-    _cart = []; _discount = 0; _payMethod = 'نقدي';
+    _cart = []; _discount = 0; _payMethod = 'نقدي'; _prescription = null; _useLoyalty=false;
 
     try {
       const [meds, cats, patients, taxSetting, nameSetting, noteSetting, logoSetting, showTaxSetting, showCashierSetting, defaultPaymentSetting, maxDiscountSetting] = await Promise.all([
-        DB.getMedicines(), DB.getCategories(), DB.getPatients(),
+        DB.getTopSellingMeds(50), DB.getCategories(), DB.getPatients(),
         DB.getSetting('tax_rate'), DB.getSetting('pharmacy_name'), DB.getSetting('invoice_footer_note'),
         DB.getSetting('pharmacy_logo'), DB.getSetting('invoice_show_tax'), DB.getSetting('invoice_show_cashier'),
         DB.getSetting('sales_default_payment'), DB.getSetting('sales_max_discount_percent'),
@@ -152,8 +161,14 @@ const SalesPage = (() => {
     } catch(e) { Toast.err('خطأ', e.message); }
 
     // events
-    document.getElementById('posSearch')?.addEventListener('input', debounce(e=>{
-      _search = e.target.value.trim(); renderGrid();
+    document.getElementById('posSearch')?.addEventListener('input', debounce(async e=>{
+      _search = e.target.value.trim();
+      if (_search.length >= 2) {
+        try { _allMeds = await DB.searchMedicines(_search); } catch (_) {}
+      } else if (!_search) {
+        try { _allMeds = await DB.getTopSellingMeds(50); } catch (_) {}
+      }
+      renderGrid();
     }, 250));
 
     document.getElementById('posCatFilters')?.addEventListener('click', e=>{
@@ -189,8 +204,72 @@ const SalesPage = (() => {
     });
 
     document.getElementById('checkoutBtn')?.addEventListener('click', checkout);
+    document.getElementById('addPrescriptionBtn')?.addEventListener('click', _openPrescriptionModal);
+    document.getElementById('posPatient')?.addEventListener('change', async e=>{
+      if(!e.target.value) return;
+      try {
+        const [debt,loyalty]=await Promise.all([DB.getPatientDebt(e.target.value),DB.getLoyalty(e.target.value)]);
+        if(debt.balance>0) Toast.warn('تنبيه مديونية',`على العميل دين سابق بقيمة ${Fmt.money(debt.balance)}`);
+        const option=document.getElementById('loyaltyOption'); if(option){option.style.display=loyalty.points>0?'block':'none';option.title=`الرصيد ${Number(loyalty.points).toFixed(2)} نقطة`;}
+      } catch(_){}
+    });
+    document.getElementById('useLoyalty')?.addEventListener('change',e=>_useLoyalty=e.target.checked);
 
     _setupBarcodeScanner();
+    _setupKeyboardShortcuts();
+  }
+
+  function _setupKeyboardShortcuts(){
+    if(_shortcutListenerAttached)return; _shortcutListenerAttached=true;
+    document.addEventListener('keydown',e=>{
+      if(!document.getElementById('page-sales'))return;
+      if(e.key==='F1'){e.preventDefault();document.getElementById('posSearch')?.focus();}
+      else if(e.key==='F2'){e.preventDefault();document.getElementById('checkoutBtn')?.click();}
+      else if(e.key==='F3'){e.preventDefault();if(_cart.length)Modal.confirm('مسح السلة','هل تريد حذف كل الأصناف من السلة؟',()=>{_cart=[];updateCartUI();},'مسح السلة');}
+      else if(e.key==='Escape'&&!Modal.isLocked()){Modal.close();}
+      else if((e.key==='ArrowDown'||e.key==='ArrowUp')&&document.activeElement?.id==='posSearch'){
+        e.preventDefault();const cards=[...document.querySelectorAll('#posGrid .med-card:not(.oos)')];if(!cards.length)return;
+        _keyboardIndex=e.key==='ArrowDown'?Math.min(cards.length-1,_keyboardIndex+1):Math.max(0,_keyboardIndex-1);
+        cards.forEach((c,i)=>c.style.outline=i===_keyboardIndex?'2px solid var(--teal-500)':'');cards[_keyboardIndex]?.scrollIntoView({block:'nearest'});
+      } else if(e.key==='Enter'&&document.activeElement?.id==='posSearch'&&_keyboardIndex>=0){
+        const card=document.querySelectorAll('#posGrid .med-card:not(.oos)')[_keyboardIndex];if(card){e.preventDefault();addToCart(card.dataset.mid);}
+      }
+    });
+  }
+
+  function _findByBarcode(code) {
+    const c = String(code || '').trim();
+    return _allMeds.find(m=>m.pharmacyBarcode===c) ||
+      _allMeds.find(m=>m.companyBarcode===c) ||
+      _allMeds.find(m=>m.barcode===c) ||
+      _allMeds.find(m=>String(m.id).toLowerCase()===c.toLowerCase());
+  }
+
+  function _openPrescriptionModal() {
+    Modal.open({
+      title:'<i class="fas fa-file-prescription"></i> بيانات الروشتة', size:'sm',
+      body:`<div class="form-grid cols-2">
+        <div class="form-group"><label>اسم الطبيب *</label><input class="form-control" id="rxDoctor" value="${_esc(_prescription?.doctor_name||'')}"></div>
+        <div class="form-group"><label>رقم الترخيص *</label><input class="form-control" id="rxLicense" value="${_esc(_prescription?.doctor_license||'')}"></div>
+        <div class="form-group"><label>نوع الروشتة *</label><select class="form-control" id="rxType"><option>عادية</option><option>مخدرات</option><option>جدول</option><option>مزمنة</option></select></div>
+        <div class="form-group"><label>تاريخ الروشتة</label><input class="form-control" id="rxDate" type="date" value="${_prescription?.date||new Date().toISOString().slice(0,10)}"></div>
+      </div><div class="form-group"><label>صورة الروشتة (اختياري)</label><input class="form-control" id="rxImage" type="file" accept="image/*" capture="environment"></div>`,
+      foot:'<button class="btn btn-ghost" onclick="Modal.close()">إلغاء</button><button class="btn btn-primary" id="saveRxBtn"><i class="fas fa-check"></i> ربط الروشتة</button>'
+    });
+    if (_prescription?.prescription_type) document.getElementById('rxType').value=_prescription.prescription_type;
+    document.getElementById('saveRxBtn')?.addEventListener('click', async()=>{
+      const doctor_name=document.getElementById('rxDoctor').value.trim();
+      const doctor_license=document.getElementById('rxLicense').value.trim();
+      if(!doctor_name||!doctor_license){ Toast.warn('بيانات ناقصة','اسم الطبيب ورقم الترخيص مطلوبان'); return; }
+      let image_data=_prescription?.image_data||null;
+      const file=document.getElementById('rxImage').files?.[0];
+      if(file) image_data=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=reject;r.readAsDataURL(file);});
+      _prescription={doctor_name,doctor_license,prescription_type:document.getElementById('rxType').value,date:document.getElementById('rxDate').value,image_data};
+      const status=document.getElementById('prescriptionStatus');
+      if(status){status.style.display='block';status.innerHTML=`<i class="fas fa-circle-check"></i> روشتة د. ${_esc(doctor_name)} مرتبطة بالفاتورة`;}
+      document.getElementById('addPrescriptionBtn').innerHTML='<i class="fas fa-pen"></i> تعديل الروشتة';
+      Modal.close(); Toast.ok('تم ربط الروشتة');
+    });
   }
 
   /* ── BARCODE SCANNER (USB scanners act as a fast keyboard) ──
@@ -204,7 +283,7 @@ const SalesPage = (() => {
         if (e.key === 'Enter') {
           const val = searchInput.value.trim();
           if (val) {
-            const med = _allMeds.find(m => m.barcode === val || m.id.toLowerCase() === val.toLowerCase());
+            const med = _findByBarcode(val);
             if (med) {
               e.preventDefault();
               addToCart(med.id);
@@ -239,7 +318,7 @@ const SalesPage = (() => {
         const code = _barcodeBuf.trim();
         _barcodeBuf = '';
         if (code.length >= 3) {
-          const med = _allMeds.find(m => m.barcode === code || m.id.toLowerCase() === code.toLowerCase());
+          const med = _findByBarcode(code);
           if (med) {
             e.preventDefault();
             addToCart(med.id);
@@ -293,6 +372,7 @@ const SalesPage = (() => {
       return;
     }
 
+    _keyboardIndex=-1;
     grid.innerHTML = meds.map(m=>{
       const oos = m.stock===0;
       const low = m.stock>0 && m.stock<=m.minStock;
@@ -323,7 +403,7 @@ const SalesPage = (() => {
       if (existing.qty >= med.stock) { Toast.warn('تنبيه',`لا يوجد مخزون كافٍ (${med.stock} فقط)`); return; }
       existing.qty++; existing.total = existing.qty * existing.price;
     } else {
-      _cart.push({ medId, name:med.name, qty:1, price:med.price, total:med.price, unit:med.unit });
+      _cart.push({ medId, name:med.name, qty:1, price:med.price, total:med.price, unit:med.saleUnit||med.unit, controlled:med.controlled });
     }
     updateCartUI();
     Toast.info('', `تمت إضافة ${med.name}`, 1200);
@@ -386,6 +466,11 @@ const SalesPage = (() => {
 
   async function checkout() {
     if (!_cart.length) { Toast.err('السلة فارغة','أضف أدوية للسلة أولاً'); return; }
+    const controlled = _cart.filter(i=>i.controlled);
+    if (controlled.length && !_prescription) {
+      Toast.warn('الروشتة مطلوبة', `لا يمكن بيع ${controlled.map(i=>i.name).join('، ')} بدون روشتة`);
+      _openPrescriptionModal(); return;
+    }
     const sub   = _cart.reduce((a,i)=>a+i.total,0);
     const disc  = Math.min(_discount,sub);
     const tax   = (sub-disc)*TAX_RATE;
@@ -403,6 +488,8 @@ const SalesPage = (() => {
         subtotal:sub, discount:disc, tax, total,
         paymentMethod: _payMethod,
         cashier: cashierName,
+        prescription: _prescription,
+        useLoyalty: _useLoyalty,
       });
 
       const saleData = {
@@ -426,7 +513,7 @@ const SalesPage = (() => {
       }
 
       Toast.ok('تمت العملية', `تم إصدار ${result.invoiceNum} بقيمة ${Fmt.money(total)}`);
-      _cart=[]; _discount=0;
+      _cart=[]; _discount=0; _prescription=null;
       const di=document.getElementById('discountInput'); if(di) di.value='0';
       const pp=document.getElementById('posPatient');    if(pp) pp.value='';
 

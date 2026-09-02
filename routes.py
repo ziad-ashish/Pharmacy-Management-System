@@ -132,6 +132,44 @@ def register_routes(app):
         user_id = body.pop("__user_id", None)
         return _resp(_api.add_sale(json.dumps(body), user_id))
 
+    @app.route("/api/get_prescriptions_report")
+    def get_prescriptions_report():
+        return _resp(_api.get_prescriptions_report(request.args.get("month", "")))
+
+    @app.route("/api/get_top_selling_meds/<int:limit>")
+    def get_top_selling_meds(limit): return _resp(_api.get_top_selling_meds(limit))
+
+    @app.route("/api/search_medicines")
+    def search_medicines(): return _resp(_api.search_medicines(request.args.get("q", "")))
+
+    @app.route("/api/get_debts")
+    def get_debts(): return _resp(_api.get_debts(request.args.get("overdue") == "1"))
+
+    @app.route("/api/get_patient_debt/<patient_id>")
+    def get_patient_debt(patient_id): return _resp(_api.get_patient_debt(patient_id))
+
+    @app.route("/api/pay_debt/<debt_id>", methods=["POST"])
+    def pay_debt(debt_id):
+        body=request.get_json(force=True) or {}; uid=body.pop("__user_id",None)
+        return _resp(_api.pay_debt(debt_id,body.get("amount",0),uid))
+
+    @app.route("/api/import_medicines", methods=["POST"])
+    def import_medicines():
+        uid=request.form.get("__user_id") or request.headers.get("X-User-Id")
+        uploaded=request.files.get("file")
+        if uploaded: text=uploaded.read().decode("utf-8-sig")
+        else: text=(request.get_json(silent=True) or {}).get("csv","")
+        return _resp(_api.import_medicines(text,uid))
+
+    @app.route("/api/get_turnover_report")
+    def get_turnover_report(): return _resp(_api.get_turnover_report(request.args.get("days",30)))
+
+    @app.route("/api/get_loyalty/<patient_id>")
+    def get_loyalty(patient_id): return _resp(_api.get_loyalty(patient_id))
+
+    @app.route("/api/get_insurance_report")
+    def get_insurance_report(): return _resp(_api.get_insurance_report(request.args.get("month","")))
+
     @app.route("/api/void_sale/<sale_id>", methods=["POST"])
     def void_sale(sale_id):
         body    = request.get_json(force=True) or {}
@@ -185,6 +223,10 @@ def register_routes(app):
     @app.route("/api/backup_database", methods=["POST"])
     def backup_database():
         return _resp(_api.backup_database())
+
+    @app.route("/api/get_backup_status")
+    def get_backup_status():
+        return _resp(_api.get_backup_status())
 
     @app.route("/api/list_backups")
     def list_backups():

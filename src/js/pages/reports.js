@@ -37,6 +37,9 @@ const ReportsPage = (() => {
     <button class="tab-btn" data-tab="profit">الأرباح والتكاليف</button>
     <button class="tab-btn" data-tab="stagnant">الأصناف الراكدة</button>
     <button class="tab-btn" data-tab="financial">المالي</button>
+    <button class="tab-btn" data-tab="prescriptions">الروشتات</button>
+    <button class="tab-btn" data-tab="turnover">دوران المخزون</button>
+    <button class="tab-btn" data-tab="insurance">التأمين</button>
   </div>
 
   <div id="rptContent">
@@ -77,7 +80,7 @@ const ReportsPage = (() => {
   /* ════════════════════════════════════════════════════════
      RENDER TAB
   ════════════════════════════════════════════════════════ */
-  function _renderTab(tab) {
+  async function _renderTab(tab) {
     const { stats, monthly, topMeds, catDist, sales, meds, low } = _data;
     const today   = new Date().toISOString().split('T')[0];
     const month   = new Date().toISOString().slice(0, 7);
@@ -92,6 +95,17 @@ const ReportsPage = (() => {
 
     const content = document.getElementById('rptContent');
     if (!content) return;
+
+    if(tab==='prescriptions'){
+      const selected=new Date().toISOString().slice(0,7),report=await DB.getPrescriptionsReport(selected);
+      content.innerHTML=`<div class="card"><div class="card-head"><span class="card-title"><i class="fas fa-file-prescription"></i> روشتات ${selected}</span><span class="badge bdg-teal">${report.count} روشتة</span></div><div class="card-body p0"><div class="tbl-wrap"><table class="dtable"><thead><tr><th>الفاتورة</th><th>التاريخ</th><th>المريض</th><th>الطبيب</th><th>الترخيص</th><th>النوع</th><th>الإجمالي</th></tr></thead><tbody>${report.items.map(r=>`<tr><td>${r.invoice_num}</td><td>${Fmt.dateShort(r.date)}</td><td>${r.patient_name||'عميل عادي'}</td><td>${r.doctor_name}</td><td>${r.doctor_license}</td><td>${r.prescription_type}</td><td>${Fmt.money(r.total)}</td></tr>`).join('')||'<tr><td colspan="7">لا توجد روشتات في هذا الشهر</td></tr>'}</tbody></table></div></div></div>`;return;
+    }
+    if(tab==='turnover'){
+      const rows=await DB.getTurnoverReport(30);content.innerHTML=`<div class="card"><div class="card-head"><span class="card-title">معدل دوران المخزون — آخر 30 يومًا</span></div><div class="card-body p0"><div class="tbl-wrap"><table class="dtable"><thead><tr><th>الصنف</th><th>المباع</th><th>المخزون</th><th>المعدل</th><th>التصنيف</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${r.name}</td><td>${r.sold}</td><td>${r.stock}</td><td>${r.turnover_rate}</td><td><span class="badge ${r.classification==='سريع'?'bdg-ok':r.classification==='راكد'?'bdg-err':'bdg-warn'}">${r.classification}</span></td></tr>`).join('')}</tbody></table></div></div></div>`;return;
+    }
+    if(tab==='insurance'){
+      const report=await DB.getInsuranceReport(new Date().toISOString().slice(0,7));content.innerHTML=`<div class="rpt-card" style="margin-bottom:1rem"><div class="rpt-card-val">${Fmt.money(report.total)}</div><div class="rpt-card-lbl">مستحقات شركات التأمين هذا الشهر</div></div><div class="card"><div class="card-body p0"><div class="tbl-wrap"><table class="dtable"><thead><tr><th>الفاتورة</th><th>المريض</th><th>الشركة</th><th>الوثيقة</th><th>نصيب التأمين</th><th>نصيب المريض</th></tr></thead><tbody>${report.items.map(r=>`<tr><td>${r.invoice_num}</td><td>${r.patient_name}</td><td>${r.insurance_company}</td><td>${r.policy_number}</td><td>${Fmt.money(r.insurance_amount)}</td><td>${Fmt.money(r.patient_amount)}</td></tr>`).join('')||'<tr><td colspan="6">لا توجد مطالبات تأمين</td></tr>'}</tbody></table></div></div></div>`;return;
+    }
 
     /* ── نظرة عامة ─────────────────────────────────────── */
     if (tab === 'overview') {

@@ -324,6 +324,7 @@ const AccountsPage = (() => {
             <span>الرصيد الفعلي في الصندوق <b>*</b></span>
             <div class="mf-money"><input id="closingCashInput" type="number" min="0" step="0.01" class="form-control" placeholder="0.00"><em>ر.س</em></div>
           </label>
+          <div class="form-row cols-3" style="margin-top:.8rem"><div class="form-group"><label>إجمالي البطاقة الفعلي</label><input id="actualCardInput" type="number" min="0" step=".01" class="form-control" placeholder="حسب كشف الجهاز"></div><div class="form-group"><label>التحويل الفعلي</label><input id="actualTransferInput" type="number" min="0" step=".01" class="form-control"></div><div class="form-group"><label>الآجل المسجل</label><input id="actualCreditInput" type="number" min="0" step=".01" class="form-control"></div></div>
           <div id="sessionDiffPreview" style="margin-top:.75rem;font-size:.85rem;color:var(--tx-3)"></div>`,
         foot: `<button class="btn btn-primary" id="confirmCloseBtn"><i class="fas fa-lock"></i> تأكيد الإغلاق</button>
                <button class="btn btn-ghost" onclick="Modal.close()">إلغاء</button>`,
@@ -339,7 +340,10 @@ const AccountsPage = (() => {
         const closing = parseFloat(document.getElementById('closingCashInput')?.value);
         if (isNaN(closing)) { Toast.warn('تنبيه', 'أدخل الرصيد الفعلي'); return; }
         try {
-          const result = await DB.closeSession(_session.id, { closing_cash: closing });
+          const result = await DB.closeSession(_session.id, { closing_cash: closing,
+            actual_card:parseFloat(document.getElementById('actualCardInput')?.value)||0,
+            actual_transfer:parseFloat(document.getElementById('actualTransferInput')?.value)||0,
+            actual_credit:parseFloat(document.getElementById('actualCreditInput')?.value)||0 });
           const diff   = result.difference || 0;
           const diffColor = Math.abs(diff) < 1 ? 'var(--ok)' : diff > 0 ? 'var(--ok)' : 'var(--err)';
           Modal.close();
@@ -354,6 +358,10 @@ const AccountsPage = (() => {
                 <div class="detail-row" style="font-size:1rem"><span class="dr-label" style="font-weight:800">الفرق</span>
                   <span class="dr-val" style="color:${diffColor};font-weight:800">${diff > 0 ? '+' : ''}${Fmt.money(diff)}</span>
                 </div>
+                ${Object.entries(result.channels||{}).map(([key,v])=>{
+                  const labels={cash:'نقدي',card:'بطاقة',transfer:'تحويل',credit:'آجل'};
+                  return `<div class="detail-row"><span class="dr-label">${labels[key]||key}</span><span class="dr-val">متوقع ${Fmt.money(v.expected)} / فعلي ${Fmt.money(v.actual)} / فرق ${Fmt.money(v.difference)}</span></div>`;
+                }).join('')}
                 ${Math.abs(diff) > 0.01 ? `<div style="margin-top:.75rem;padding:.6rem;background:${diff<0?'#fee2e2':'#d1fae5'};border-radius:8px;font-size:.8rem">
                   ${diff < 0 ? '⚠ يوجد عجز في الصندوق — يُنصح بمراجعة المعاملات' : '✓ يوجد فائض في الصندوق'}
                 </div>` : '<div style="margin-top:.75rem;color:var(--ok);font-weight:700">✓ الصندوق مطابق تماماً</div>'}
@@ -381,8 +389,8 @@ const AccountsPage = (() => {
               <td>${Fmt.money(s.opening_cash||0)}</td>
               <td>${Fmt.money(s.closing_cash||0)}</td>
               <td style="color:var(--teal-600)">${Fmt.money(s.sales_total||0)}</td>
-              <td style="color:${Math.abs(s.difference||0)<0.01?'var(--ok)':s.difference>0?'var(--ok)':'var(--err)'};font-weight:700">
-                ${s.status==='مفتوحة'?'—':(s.difference>0?'+':'')+Fmt.money(s.difference||0)}
+              <td style="font-weight:700;color:${(()=>{ const d=s.difference||0; return Math.abs(d)<0.01?'var(--ok)':d>0?'var(--ok)':'var(--err)'; })()}">
+                ${s.status==='مفتوحة' ? '—' : (s.difference>0?'+':'')+Fmt.money(s.difference||0)}
               </td>
               <td><span class="badge ${s.status==='مفتوحة'?'bdg-warn':'bdg-ok'}">${s.status}</span></td>
             </tr>`).join('')}</tbody>

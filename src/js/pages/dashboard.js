@@ -75,6 +75,10 @@ const DashboardPage = (() => {
       _loadSelectedRange();
     });
     await _loadSelectedRange();
+    try {
+      const backup = await DB.getBackupStatus();
+      if (backup?.stale) Toast.warn('النسخ الاحتياطي متأخر', 'مضت 3 أيام أو أكثر بدون نسخة احتياطية سليمة.');
+    } catch (_) { /* لا نوقف لوحة التحكم بسبب فحص النسخ */ }
   }
 
   async function _loadSelectedRange() {

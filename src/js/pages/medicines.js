@@ -22,6 +22,9 @@ const MedicinesPage = (() => {
       <p class="pg-subtitle">إدارة كامل المخزون الدوائي</p>
     </div>
     <div class="pg-actions">
+      <input type="file" id="medImportFile" accept=".csv,text/csv" hidden>
+      <button class="btn btn-ghost btn-sm" id="medTemplateBtn"><i class="fas fa-file-arrow-down"></i> قالب CSV</button>
+      <button class="btn btn-ghost btn-sm" id="medImportBtn"><i class="fas fa-file-import"></i> استيراد CSV</button>
       <button class="btn btn-ghost btn-sm" id="medExportBtn"><i class="fas fa-download"></i> تصدير</button>
       <button class="btn btn-amber" id="medAddBtn"><i class="fas fa-plus"></i> إضافة دواء</button>
     </div>
@@ -84,6 +87,16 @@ const MedicinesPage = (() => {
   async function afterRender() {
     document.getElementById('medAddBtn')?.addEventListener('click', openAddModal);
     document.getElementById('medExportBtn')?.addEventListener('click', exportData);
+    document.getElementById('medImportBtn')?.addEventListener('click',()=>document.getElementById('medImportFile')?.click());
+    document.getElementById('medTemplateBtn')?.addEventListener('click',()=>{
+      const csv='name,scientific_name,category,barcode,price,cost,stock,unit,expiry,location,min_stock\n';
+      const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'}));a.download='medicines_template.csv';a.click();URL.revokeObjectURL(a.href);
+    });
+    document.getElementById('medImportFile')?.addEventListener('change',async e=>{
+      const file=e.target.files?.[0]; if(!file)return;
+      try{const result=await DB.importMedicinesCSV(file);Toast.ok('اكتمل الاستيراد',`تم حفظ ${result.saved} ورفض ${result.rejected}`);await _loadData();if(result.errors?.length)console.table(result.errors);}
+      catch(err){Toast.err('فشل الاستيراد',err.message);} finally{e.target.value='';}
+    });
 
     document.getElementById('medTabs')?.addEventListener('click', e => {
       const btn = e.target.closest('.tab-btn');
@@ -183,9 +196,9 @@ const MedicinesPage = (() => {
           <td>${m.name}</td>
           <td>${m.scientificName || '—'}</td>
           <td>${m.manufacturer || '—'}</td>
-          <td>${m.unit || '—'}</td>
+          <td><strong>${m.saleUnit || m.unit || '—'}</strong><small style="display:block;color:var(--tx-3)">شراء: ${m.purchaseUnit || m.unit || '—'} × ${m.conversionFactor||1}</small></td>
           <td>${Fmt.money(m.price)}</td>
-          <td><strong style="color:var(--teal-600)">${m.stock}</strong></td>
+          <td><strong style="color:var(--teal-600)">${m.stock} ${m.saleUnit||m.unit}</strong><small style="display:block;color:var(--tx-3)">≈ ${Math.floor(m.stock/(m.conversionFactor||1))} ${m.purchaseUnit||m.unit}</small></td>
           <td>${Fmt.expiryBadge(m.expiry)}</td>
           <td>${m.location || '—'}</td>
           <td>
@@ -391,6 +404,9 @@ const MedicinesPage = (() => {
               <option value="أنبوب">أنبوب</option>
             </select>
           </label>
+          <label class="mf-field"><span>وحدة الشراء</span><select id="fMedPurchaseUnit" class="form-control"><option>علبة</option><option>كرتونة</option><option>شريط</option><option>زجاجة</option></select></label>
+          <label class="mf-field"><span>عدد وحدات الصرف داخل وحدة الشراء</span><input id="fMedConversionFactor" class="form-control" type="number" min="1" value="1"></label>
+          <label class="mf-field"><span>التصنيف الرقابي</span><select id="fMedControlled" class="form-control"><option value="0">دواء عادي</option><option value="1">خاضع للرقابة — يتطلب روشتة</option></select></label>
           <label class="mf-field">
             <span>الكمية الحالية <b>*</b></span>
             <input id="fMedQuantityPerBox" class="form-control" type="number" min="0" value="0">
@@ -726,6 +742,10 @@ const MedicinesPage = (() => {
       cost:            parseFloat(document.getElementById('fMedCostPrice')?.value),
       price:           parseFloat(document.getElementById('fMedSellPrice')?.value),
       unit:            document.getElementById('fMedUnitType')?.value,
+      saleUnit:        document.getElementById('fMedUnitType')?.value,
+      purchaseUnit:    document.getElementById('fMedPurchaseUnit')?.value,
+      conversionFactor:parseInt(document.getElementById('fMedConversionFactor')?.value)||1,
+      controlled:      document.getElementById('fMedControlled')?.value==='1',
       minStock:        parseInt(document.getElementById('fMedMinStock')?.value),
       stock:           parseInt(document.getElementById('fMedQuantityPerBox')?.value),
       expiry:          document.getElementById('fMedExpiry')?.value,

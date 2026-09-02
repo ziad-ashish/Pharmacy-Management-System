@@ -38,8 +38,9 @@ const Toast = (() => {
 /* ── MODAL ──────────────────────────────────────────────── */
 const Modal = (() => {
   let _onConfirm = null;
+  let _locked = false;
 
-  function open({ title='', body='', foot='', size='', onConfirm=null }) {
+  function open({ title='', body='', foot='', size='', onConfirm=null, locked=false }) {
     const overlay = document.getElementById('gOverlay');
     const modal   = document.getElementById('gModal');
     const mtitle  = document.getElementById('gModalTitle');
@@ -53,13 +54,17 @@ const Modal = (() => {
 
     modal.className = `g-modal${size ? ' '+size : ''}`;
     _onConfirm = onConfirm;
+    _locked = Boolean(locked);
+    const closeBtn = document.getElementById('gModalClose');
+    if (closeBtn) closeBtn.style.display = _locked ? 'none' : '';
 
     overlay.classList.add('on');
     modal.classList.add('on');
     document.body.style.overflow = 'hidden';
   }
 
-  function close() {
+  function close(force=false) {
+    if (_locked && !force) return;
     const overlay = document.getElementById('gOverlay');
     const modal   = document.getElementById('gModal');
     if (!modal) return;
@@ -67,6 +72,7 @@ const Modal = (() => {
     modal.classList.remove('on');
     document.body.style.overflow = '';
     _onConfirm = null;
+    _locked = false;
   }
 
   function confirm(title, msg, onYes, yesLabel='تأكيد', yesClass='btn-danger') {
@@ -88,7 +94,7 @@ const Modal = (() => {
     document.getElementById('gOverlay')?.addEventListener('click', close);
   });
 
-  return { open, close, confirm };
+  return { open, close, confirm, isLocked:()=>_locked };
 })();
 
 /* ── FORMAT HELPERS ─────────────────────────────────────── */
@@ -542,4 +548,3 @@ function printBarcodeStickers(medicine, count = 1, pharmacyName = 'صيدلية 
   printElement('tempBarcodePrintSheet', `ملصقات باركود - ${medicine.name}`);
   setTimeout(() => container.remove(), 2000);
 }
-

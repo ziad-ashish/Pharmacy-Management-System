@@ -54,6 +54,7 @@ const App = (() => {
     purchases: { module: PurchasesPage,  label: 'أوامر الشراء' },
     shortage:  { module: ShortagePage,   label: 'كشكول النواقص' },
     accounts:  { module: AccountsPage,   label: 'الحسابات المالية' },
+    debts:     { module: DebtsPage,      label: 'ديون العملاء' },
     patients:  { module: PatientsPage,   label: 'المرضى' },
     suppliers: { module: SuppliersPage,  label: 'الموردون' },
     hr:        { module: HRPage,         label: 'الموارد البشرية' },
@@ -95,20 +96,65 @@ const App = (() => {
     if (splash) splash.classList.remove('hidden');
 
     _runSplash(() => {
-      document.getElementById('appShell')?.classList.remove('hidden');
-      _setupSidebar();
-      _setupUserMenu();
-      _updateUserInfo();
-      _applyBranding();
-      _setupSearch();
-      _setupNotifications();
-      _startClock();
-      navigate('dashboard');
-      _updateBadges();
+      try {
+        document.getElementById('appShell')?.classList.remove('hidden');
+        _setupSidebar();
+        _setupUserMenu();
+        _updateUserInfo();
+        _applyBranding();
+        _setupSearch();
+        _setupNotifications();
+        _startClock();
+        navigate('dashboard');
+        _updateBadges().catch(e => console.warn('badges error:', e));
+      } catch(err) {
+        console.error('[_enterApp] critical error:', err);
+        // أظهر الـ app على أي حال بدون تجميد
+        document.getElementById('appShell')?.classList.remove('hidden');
+        navigate('dashboard');
+      }
     });
   }
 
   /* ── LOGIN ── */
+  function _forcePasswordChange(user, oldPassword, remember) {
+    return new Promise(resolve => {
+      Modal.open({
+        locked: true,
+        size: 'sm',
+        title: '<i class="fas fa-shield-halved"></i> تأمين الحساب مطلوب',
+        body: `<p class="form-hint" style="margin-bottom:1rem">أنت تستخدم كلمة المرور الافتراضية. يجب تغييرها قبل الدخول للنظام.</p>
+          <div class="form-group"><label>كلمة المرور الجديدة</label><input class="form-control" id="forcedNewPwd" type="password" minlength="8" autocomplete="new-password"></div>
+          <div class="form-group"><label>تأكيد كلمة المرور</label><input class="form-control" id="forcedConfirmPwd" type="password" minlength="8" autocomplete="new-password"></div>
+          <div id="forcedPwdError" class="form-error" style="display:none;margin-top:.7rem"></div>`,
+        foot: '<button class="btn btn-primary" id="forcedPwdSave"><i class="fas fa-lock"></i> تغيير كلمة المرور والمتابعة</button>'
+      });
+      const save = document.getElementById('forcedPwdSave');
+      save?.addEventListener('click', async () => {
+        const pwd = document.getElementById('forcedNewPwd')?.value || '';
+        const confirm = document.getElementById('forcedConfirmPwd')?.value || '';
+        const err = document.getElementById('forcedPwdError');
+        const fail = msg => { if (err) { err.textContent=msg; err.style.display='block'; } };
+        if (pwd.length < 8) return fail('كلمة المرور يجب ألا تقل عن 8 أحرف.');
+        if (pwd !== confirm) return fail('كلمتا المرور غير متطابقتين.');
+        if (pwd === oldPassword) return fail('اختر كلمة مرور مختلفة عن الافتراضية.');
+        save.disabled = true;
+        try {
+          await DB.changePassword(user.id, oldPassword, pwd);
+          const secured = {...user, isDefaultPassword:false};
+          Auth.set(secured, remember);
+          Modal.close(true);
+          Toast.ok('تم تأمين الحساب', 'تم تغيير كلمة المرور بنجاح');
+          resolve(secured);
+        } catch (e) {
+          save.disabled = false;
+          fail(e.message || 'تعذر تغيير كلمة المرور');
+        }
+      });
+      document.getElementById('forcedNewPwd')?.focus();
+    });
+  }
+
   function _setupLogin(initialError = '') {
     const loginScreen = document.getElementById('loginScreen');
     const splash = document.getElementById('splashScreen');
@@ -195,6 +241,7 @@ const App = (() => {
         const user = await DB.login(username, password);
         if (!user || !user.id) throw new Error('فشل تسجيل الدخول');
         Auth.set(user, rememberMe.checked);
+        if (user.isDefaultPassword) await _forcePasswordChange(user, password, rememberMe.checked);
         passwordInp.value = '';
         setLoading(false);
         loginInFlight = false;
@@ -428,7 +475,12 @@ const App = (() => {
 
     // call async afterRender
     if (typeof pg.module.afterRender === 'function') {
-      requestAnimationFrame(() => pg.module.afterRender());
+      requestAnimationFrame(() => {
+        Promise.resolve(pg.module.afterRender()).catch(err => {
+          console.error(`[navigate] afterRender error on page "${pageId}":`, err);
+          Toast.err('خطأ في تحميل الصفحة', err?.message || String(err));
+        });
+      });
     }
 
     // sidebar active state
