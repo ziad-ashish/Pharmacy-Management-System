@@ -72,6 +72,19 @@ class NewPharmacyFeaturesTests(unittest.TestCase):
         self.assertEqual(med["pharmacy_barcode"], "PHARM")
         self.assertEqual(med["conversion_factor"], 20)
 
+    def test_sale_tax_is_taken_from_settings_and_zero_is_respected(self):
+        mid = self._medicine()
+        con = api._conn()
+        con.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('tax_rate','0')")
+        con.commit(); con.close()
+        sale = {"items": [{"medId": mid, "name": "دواء اختبار", "qty": 2, "price": 10, "total": 20}],
+                "subtotal": 20, "discount": 0, "tax": 999, "total": 1019}
+        result = json.loads(self.api.add_sale(json.dumps(sale)))
+        self.assertTrue(result["ok"], result)
+        stored = json.loads(self.api.get_sale(result["data"]["id"]))["data"]
+        self.assertEqual(stored["tax"], 0)
+        self.assertEqual(stored["total"], 20)
+
 
 if __name__ == "__main__":
     unittest.main()

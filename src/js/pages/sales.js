@@ -15,8 +15,8 @@ const SalesPage = (() => {
   let _pharmacyName = 'صيدلية الشفاء';
   let _pharmacyLogo = '';
   let _invoiceNote  = 'شكراً لزيارتكم • صحة وعافية';
-  let TAX_RATE = 0.05;
-  let _showTax     = true;
+  let TAX_RATE = 0;
+  let _showTax     = false;
   let _showCashier = true;
   let _maxDiscountPct = 100;
   let _barcodeBuf  = '';
@@ -93,7 +93,7 @@ const SalesPage = (() => {
           <span class="cr-label">الخصم (ر.س)</span>
           <input type="number" class="discount-input" id="discountInput" min="0" value="0" />
         </div>
-        <div class="cart-row"><span class="cr-label" id="crTaxLabel">الضريبة 5%</span><span class="cr-val" id="crTax">0.00 ر.س</span></div>
+        <div class="cart-row" id="crTaxRow" style="display:none"><span class="cr-label" id="crTaxLabel">الضريبة 0%</span><span class="cr-val" id="crTax">0.00 ر.س</span></div>
         <div class="cart-row grand">
           <span>الإجمالي</span><span class="cr-val" id="crTotal">0.00 ر.س</span>
         </div>
@@ -117,15 +117,19 @@ const SalesPage = (() => {
 
   async function afterRender() {
     _cart = []; _discount = 0; _payMethod = 'نقدي'; _prescription = null; _useLoyalty=false;
+    // الصفر هو الوضع الآمن. لا توجد ضريبة إلا إذا قرأنا قيمة موجبة محفوظة فعلياً.
+    TAX_RATE = 0;
+    _showTax = false;
 
     try {
+      const safe = promise => promise.catch(() => null);
       const [meds, cats, patients, taxSetting, nameSetting, noteSetting, logoSetting, showTaxSetting, showCashierSetting, defaultPaymentSetting, maxDiscountSetting] = await Promise.all([
-        DB.getTopSellingMeds(50), DB.getCategories(), DB.getPatients(),
-        DB.getSetting('tax_rate'), DB.getSetting('pharmacy_name'), DB.getSetting('invoice_footer_note'),
-        DB.getSetting('pharmacy_logo'), DB.getSetting('invoice_show_tax'), DB.getSetting('invoice_show_cashier'),
-        DB.getSetting('sales_default_payment'), DB.getSetting('sales_max_discount_percent'),
+        safe(DB.getTopSellingMeds(50)), safe(DB.getCategories()), safe(DB.getPatients()),
+        safe(DB.getSetting('tax_rate')), safe(DB.getSetting('pharmacy_name')), safe(DB.getSetting('invoice_footer_note')),
+        safe(DB.getSetting('pharmacy_logo')), safe(DB.getSetting('invoice_show_tax')), safe(DB.getSetting('invoice_show_cashier')),
+        safe(DB.getSetting('sales_default_payment')), safe(DB.getSetting('sales_max_discount_percent')),
       ]);
-      _allMeds = meds;
+      _allMeds = meds || [];
 
       if (nameSetting) _pharmacyName = nameSetting;
       if (noteSetting) _invoiceNote = noteSetting;
@@ -136,26 +140,25 @@ const SalesPage = (() => {
       const parsedMaxDiscount = parseFloat(maxDiscountSetting);
       _maxDiscountPct = Number.isFinite(parsedMaxDiscount) ? Math.max(0, Math.min(100, parsedMaxDiscount)) : 100;
       document.querySelectorAll('.pay-btn').forEach(b=>b.classList.toggle('sel', b.dataset.pm===_payMethod));
-      const parsedTax = parseFloat(taxSetting);
-      if (!isNaN(parsedTax) && parsedTax >= 0) {
-        TAX_RATE = parsedTax / 100;
-        const taxLabel = document.getElementById('crTaxLabel');
-        if (taxLabel) taxLabel.textContent = `الضريبة ${parsedTax}%`;
-      }
+      const parsedTax = Number.parseFloat(taxSetting);
+      const effectiveTax = Number.isFinite(parsedTax) && parsedTax > 0 ? parsedTax : 0;
+      TAX_RATE = effectiveTax / 100;
+      const taxLabel = document.getElementById('crTaxLabel');
+      if (taxLabel) taxLabel.textContent = `الضريبة ${effectiveTax}%`;
       // FIX: don't show a tax row at all when there's no tax rate configured,
       // or when the "show tax" option is switched off in settings
-      const taxRow = document.getElementById('crTaxLabel')?.closest('.cart-row');
+      const taxRow = document.getElementById('crTaxRow');
       if (taxRow) taxRow.style.display = (_showTax && TAX_RATE > 0) ? '' : 'none';
 
       // category chips
       const cf = document.getElementById('posCatFilters');
       if (cf) cf.innerHTML = `<button class="cat-chip active" data-cat="">الكل</button>` +
-        cats.map(c=>`<button class="cat-chip" data-cat="${c}">${c}</button>`).join('');
+        (cats || []).map(c=>`<button class="cat-chip" data-cat="${c}">${c}</button>`).join('');
 
       // patients list
       const ps = document.getElementById('posPatient');
       if (ps) ps.innerHTML = `<option value="">— عميل عادي —</option>` +
-        patients.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
+        (patients || []).map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
 
       renderGrid();
     } catch(e) { Toast.err('خطأ', e.message); }

@@ -919,13 +919,21 @@ class PharmacyAPI:
                     con.rollback(); con.close()
                     return _err("لا يمكن بيع دواء خاضع للرقابة بدون روشتة مكتملة: " + "، ".join(controlled_items))
 
+            # الضريبة مصدرها الإعدادات فقط، وليس القيمة القادمة من المتصفح.
+            subtotal_value = round(sum(float(i["price"]) * int(i["qty"]) for i in items), 2)
+            discount_value = max(0.0, min(float(d.get("discount", 0) or 0), subtotal_value))
+            tax_row = con.execute("SELECT value FROM settings WHERE key='tax_rate'").fetchone()
+            try: configured_tax_pct = max(0.0, float(tax_row[0])) if tax_row else 0.0
+            except (TypeError, ValueError): configured_tax_pct = 0.0
+            tax_amount = round((subtotal_value - discount_value) * configured_tax_pct / 100, 2)
+
             nid = _new_id("SL")
             inv, seq, yr = _next_invoice(con)   # safe inside IMMEDIATE
             now    = datetime.now()
             s_date = now.strftime("%Y-%m-%d")
             s_time = now.strftime("%H:%M")
 
-            total_due = float(d.get("total", 0) or 0)
+            total_due = round(subtotal_value - discount_value + tax_amount, 2)
             insurance_amount = 0.0
             patient_amount = total_due
             if d.get("patient_id"):
@@ -954,7 +962,7 @@ class PharmacyAPI:
                 " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (nid, inv, seq, yr,
                  d.get("patient_id"), d.get("patient_name"),
-                 d.get("subtotal"), d.get("discount",0), d.get("tax",0), total_due,
+                 subtotal_value, discount_value, tax_amount, total_due,
                  d.get("payment_method","نقدي"), d.get("cashier",""),
                  s_date, s_time, "مكتمل",insurance_amount,patient_amount,loyalty_discount)
             )

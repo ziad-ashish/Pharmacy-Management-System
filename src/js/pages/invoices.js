@@ -12,7 +12,8 @@ const InvoicesPage = (() => {
   let _allSales    = [];
   let _pharmacyName = 'صيدلية الشفاء';
   let _pharmacyLogo = '';
-  let _showTax     = true;
+  let _showTax     = false;
+  let _taxRate     = 0;
   let _showCashier = true;
 
   function render() {
@@ -88,15 +89,18 @@ const InvoicesPage = (() => {
     });
 
     try {
-      const [name, logo, showTaxSetting, showCashierSetting] = await Promise.all([
+      const [name, logo, showTaxSetting, showCashierSetting, taxSetting] = await Promise.all([
         DB.getSetting('pharmacy_name'),
         DB.getSetting('pharmacy_logo'),
         DB.getSetting('invoice_show_tax'),
         DB.getSetting('invoice_show_cashier'),
+        DB.getSetting('tax_rate'),
       ]);
       if (name) _pharmacyName = name;
       if (logo) _pharmacyLogo = logo;
-      _showTax     = showTaxSetting !== '0';
+      const parsedTax = Number.parseFloat(taxSetting);
+      _taxRate = Number.isFinite(parsedTax) && parsedTax > 0 ? parsedTax : 0;
+      _showTax = showTaxSetting !== '0' && _taxRate > 0;
       _showCashier = showCashierSetting !== '0';
     } catch(e) { /* keep default */ }
     await _load();
