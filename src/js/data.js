@@ -156,7 +156,7 @@ const _LS = (() => {
     getMedicine:   id => Promise.resolve((lsGet('ph_medicines').map(normMed).find(m=>m.id===id))||null),
     getMedicineByBarcode: bc => {
       const all = lsGet('ph_medicines').filter(m=>m.is_active!==0).map(normMed);
-      return Promise.resolve(all.find(m=>m.barcode===bc||m.companyBarcode===bc||m.pharmacyBarcode===bc)||null);
+      return Promise.resolve(all.find(m=>m.pharmacyBarcode===bc)||all.find(m=>m.companyBarcode===bc)||all.find(m=>m.barcode===bc)||null);
     },
     addMedicine:   d  => { const l=lsGet('ph_medicines'); const m={...d,id:'M'+(l.length+1).toString().padStart(3,'0'),is_active:1}; l.push(m); lsSet('ph_medicines',l); return Promise.resolve(m.id); },
     updateMedicine:(id,d)=>{ lsSet('ph_medicines',lsGet('ph_medicines').map(m=>m.id===id?{...m,...d}:m)); return Promise.resolve(); },
@@ -400,7 +400,7 @@ const DB = {
       return raw ? this._normMed(raw) : null;
     }
     const all = await _LS.getMedicines();
-    return all.find(m => m.barcode===barcode || m.companyBarcode===barcode || m.pharmacyBarcode===barcode) || null;
+    return all.find(m => m.pharmacyBarcode===barcode) || all.find(m => m.companyBarcode===barcode) || all.find(m => m.barcode===barcode) || null;
   },
   async addMedicine(data)   {
     if (_IS_FLASK) return _api('add_medicine', {body: this._withUser(this._toSnakeMed(data))});

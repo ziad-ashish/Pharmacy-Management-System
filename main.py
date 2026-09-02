@@ -56,7 +56,9 @@ def main():
         background_color = "#0d2b2e",
     )
 
-    webview.start(debug=True)
+    # أدوات المطور تجعل WebView يفتح نافذة Edge DevTools وتشوّش تشغيل الصيدلية.
+    # تبقى مغلقة في نسخة الاستخدام اليومي، ويمكن تفعيلها مؤقتاً أثناء التطوير فقط.
+    webview.start(debug=False)
 
 
 if __name__ == "__main__":

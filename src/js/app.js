@@ -122,14 +122,19 @@ const App = (() => {
       Modal.open({
         locked: true,
         size: 'sm',
-        title: '<i class="fas fa-shield-halved"></i> تأمين الحساب مطلوب',
-        body: `<p class="form-hint" style="margin-bottom:1rem">أنت تستخدم كلمة المرور الافتراضية. يجب تغييرها قبل الدخول للنظام.</p>
+        title: '<i class="fas fa-shield-halved"></i> تأمين الحساب',
+        body: `<p class="form-hint" style="margin-bottom:1rem">أنت تستخدم كلمة المرور الافتراضية. نوصي بتغييرها لحماية بيانات الصيدلية، أو يمكنك التخطي الآن.</p>
           <div class="form-group"><label>كلمة المرور الجديدة</label><input class="form-control" id="forcedNewPwd" type="password" minlength="8" autocomplete="new-password"></div>
           <div class="form-group"><label>تأكيد كلمة المرور</label><input class="form-control" id="forcedConfirmPwd" type="password" minlength="8" autocomplete="new-password"></div>
           <div id="forcedPwdError" class="form-error" style="display:none;margin-top:.7rem"></div>`,
-        foot: '<button class="btn btn-primary" id="forcedPwdSave"><i class="fas fa-lock"></i> تغيير كلمة المرور والمتابعة</button>'
+        foot: '<button class="btn btn-ghost" id="forcedPwdSkip">تخطي الآن</button><button class="btn btn-primary" id="forcedPwdSave"><i class="fas fa-lock"></i> تغيير كلمة المرور والمتابعة</button>'
       });
       const save = document.getElementById('forcedPwdSave');
+      document.getElementById('forcedPwdSkip')?.addEventListener('click', () => {
+        Modal.close(true);
+        Toast.warn('تم التخطي', 'ما زلت تستخدم كلمة المرور الافتراضية؛ يمكنك تغييرها لاحقًا من قائمة الحساب.');
+        resolve(user);
+      });
       save?.addEventListener('click', async () => {
         const pwd = document.getElementById('forcedNewPwd')?.value || '';
         const confirm = document.getElementById('forcedConfirmPwd')?.value || '';

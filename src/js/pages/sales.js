@@ -244,6 +244,14 @@ const SalesPage = (() => {
       _allMeds.find(m=>m.barcode===c) ||
       _allMeds.find(m=>String(m.id).toLowerCase()===c.toLowerCase());
   }
+  async function _resolveBarcode(code){
+    const local=_findByBarcode(code); if(local)return local;
+    try{
+      const remote=await DB.getMedicineByBarcode(String(code||'').trim());
+      if(remote&&!_allMeds.some(m=>m.id===remote.id))_allMeds.push(remote);
+      return remote;
+    }catch(_){return null;}
+  }
 
   function _openPrescriptionModal() {
     Modal.open({
@@ -279,11 +287,12 @@ const SalesPage = (() => {
     // 1. Handle Enter key inside posSearch (if scanner was focused in search)
     const searchInput = document.getElementById('posSearch');
     if (searchInput) {
-      searchInput.addEventListener('keydown', e => {
+      searchInput.addEventListener('keydown', async e => {
         if (e.key === 'Enter') {
+          e.stopPropagation();
           const val = searchInput.value.trim();
           if (val) {
-            const med = _findByBarcode(val);
+            const med = await _resolveBarcode(val);
             if (med) {
               e.preventDefault();
               addToCart(med.id);
@@ -303,7 +312,7 @@ const SalesPage = (() => {
     _barcodeListenerAttached = true;
 
     let _lastKeystrokeTime = 0;
-    document.addEventListener('keydown', e => {
+    document.addEventListener('keydown', async e => {
       if (!DeviceSettings.get().barcodeScan) return;
       if (!document.getElementById('page-sales')) return; // only while POS is open
 
@@ -318,7 +327,7 @@ const SalesPage = (() => {
         const code = _barcodeBuf.trim();
         _barcodeBuf = '';
         if (code.length >= 3) {
-          const med = _findByBarcode(code);
+          const med = await _resolveBarcode(code);
           if (med) {
             e.preventDefault();
             addToCart(med.id);
@@ -496,7 +505,10 @@ const SalesPage = (() => {
         invoiceNum: result.invoiceNum, date:result.date, time:result.time,
         patientName: patient?.name||'عميل عادي',
         items: _cart.slice(),
-        subtotal:sub, discount:disc, tax, total,
+        subtotal:sub, discount:disc, tax, total:result.total??total,
+        patientAmount:result.patientAmount??result.total??total,
+        insuranceAmount:result.insuranceAmount??0,
+        loyaltyDiscount:result.loyaltyDiscount??0,
         paymentMethod: _payMethod,
         cashier: cashierName,
       };
@@ -512,7 +524,7 @@ const SalesPage = (() => {
         setTimeout(() => printElement('receiptPrint'), 300);
       }
 
-      Toast.ok('تمت العملية', `تم إصدار ${result.invoiceNum} بقيمة ${Fmt.money(total)}`);
+      Toast.ok('تمت العملية', `تم إصدار ${result.invoiceNum} بقيمة ${Fmt.money(result.total??total)}`);
       _cart=[]; _discount=0; _prescription=null;
       const di=document.getElementById('discountInput'); if(di) di.value='0';
       const pp=document.getElementById('posPatient');    if(pp) pp.value='';
@@ -545,7 +557,9 @@ const SalesPage = (() => {
       <div class="rcp-div"></div>
       <div class="rcp-row"><span>المجموع الفرعي</span><span>${Fmt.money(s.subtotal)}</span></div>
       ${s.discount>0?`<div class="rcp-row"><span>الخصم</span><span>− ${Fmt.money(s.discount)}</span></div>`:''}
+      ${s.loyaltyDiscount>0?`<div class="rcp-row"><span>خصم نقاط الولاء</span><span>− ${Fmt.money(s.loyaltyDiscount)}</span></div>`:''}
       ${(_showTax && s.tax>0)?`<div class="rcp-row"><span>الضريبة ${Math.round(TAX_RATE*10000)/100}%</span><span>${Fmt.money(s.tax)}</span></div>`:''}
+      ${s.insuranceAmount>0?`<div class="rcp-row"><span>تغطية التأمين</span><span>${Fmt.money(s.insuranceAmount)}</span></div><div class="rcp-row"><span>المطلوب من المريض</span><span>${Fmt.money(s.patientAmount)}</span></div>`:''}
       <div class="rcp-div"></div>
       <div class="rcp-row total"><span>الإجمالي</span><span>${Fmt.money(s.total)}</span></div>
       <div class="rcp-barcode">

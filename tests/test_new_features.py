@@ -59,6 +59,19 @@ class NewPharmacyFeaturesTests(unittest.TestCase):
         self.assertEqual(result["data"]["saved"], 1)
         self.assertEqual(result["data"]["rejected"], 1)
 
+    def test_partial_medicine_update_preserves_safety_and_barcode_fields(self):
+        mid = self._medicine(controlled=1)
+        con = api._conn()
+        con.execute("UPDATE medicines SET company_barcode='COMP',pharmacy_barcode='PHARM' WHERE id=?", (mid,))
+        con.commit(); con.close()
+        result = json.loads(self.api.update_medicine(mid, json.dumps({"name": "اسم معدل", "price": 12})))
+        self.assertTrue(result["ok"], result)
+        med = json.loads(self.api.get_medicine(mid))["data"]
+        self.assertEqual(med["controlled"], 1)
+        self.assertEqual(med["company_barcode"], "COMP")
+        self.assertEqual(med["pharmacy_barcode"], "PHARM")
+        self.assertEqual(med["conversion_factor"], 20)
+
 
 if __name__ == "__main__":
     unittest.main()

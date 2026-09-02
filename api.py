@@ -660,20 +660,27 @@ class PharmacyAPI:
                 if dup:
                     con.close()
                     return _err(f"باركود الصيدلية '{pharmacy_barcode}' مستخدم بالفعل للدواء: {dup['name']}")
-            old = con.execute("SELECT price FROM medicines WHERE id=?", (mid,)).fetchone()
+            old = con.execute("SELECT * FROM medicines WHERE id=?", (mid,)).fetchone()
+            if not old:
+                con.close(); return _err("الدواء غير موجود")
+            def val(key, fallback_key=None):
+                if key in d and d.get(key) is not None: return d.get(key)
+                return old[fallback_key or key]
             old_price = old["price"] if old else None
             con.execute(
                 "UPDATE medicines SET name=?,scientific_name=?,manufacturer=?,batch_number=?,category=?,price=?,cost=?,stock=?,"
                 "min_stock=?,unit=?,supplier_id=?,expiry=?,barcode=?,company_barcode=?,pharmacy_barcode=?,"
                 "location=?,description=?,image_data=?,controlled=?,purchase_unit=?,sale_unit=?,conversion_factor=?"
                 " WHERE id=?",
-                (d.get("name"), d.get("scientific_name"), d.get("manufacturer"), d.get("batch_number"),
-                 d.get("category"), d.get("price"), d.get("cost"),
-                 d.get("stock"), d.get("min_stock"), d.get("unit"), d.get("supplier_id"),
-                 d.get("expiry"), barcode or None, company_barcode or None, pharmacy_barcode or None,
-                 d.get("location"), d.get("description"), d.get("image_data"),
-                 1 if d.get("controlled") else 0, d.get("purchase_unit") or d.get("unit") or "علبة",
-                 d.get("sale_unit") or d.get("unit") or "قرص", max(1, int(d.get("conversion_factor") or 1)), mid)
+                (val("name"), val("scientific_name"), val("manufacturer"), val("batch_number"),
+                 val("category"), val("price"), val("cost"), val("stock"), val("min_stock"), val("unit"), val("supplier_id"),
+                 val("expiry"), (barcode or None) if "barcode" in d else old["barcode"],
+                 (company_barcode or None) if "company_barcode" in d else old["company_barcode"],
+                 (pharmacy_barcode or None) if "pharmacy_barcode" in d else old["pharmacy_barcode"],
+                 val("location"), val("description"), val("image_data"),
+                 (1 if d.get("controlled") else 0) if "controlled" in d else old["controlled"],
+                 val("purchase_unit") or val("unit") or "علبة", val("sale_unit") or val("unit") or "قرص",
+                 max(1, int(val("conversion_factor") or 1)), mid)
             )
             details = ""
             if old_price and old_price != d.get("price"):

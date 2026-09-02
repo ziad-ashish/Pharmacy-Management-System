@@ -818,10 +818,16 @@ const MedicinesPage = (() => {
         <div class="form-group"><label class="form-label">الصلاحية *</label><input class="form-control" id="eMedExpiry" type="date" value="${med.expiry || ''}"></div>
       </div>
       <div class="form-row cols-3">
-        <div class="form-group"><label class="form-label">الباركود</label><input class="form-control" id="eMedBarcode" value="${med.barcode || ''}"></div>
+        <div class="form-group"><label class="form-label">باركود الشركة</label><input class="form-control" id="eMedCompanyBarcode" value="${med.companyBarcode || med.barcode || ''}"></div>
+        <div class="form-group"><label class="form-label">باركود الصيدلية</label><input class="form-control" id="eMedPharmacyBarcode" value="${med.pharmacyBarcode || ''}"></div>
         <div class="form-group"><label class="form-label">رقم الدفعة</label><input class="form-control" id="eMedBatch" value="${med.batchNumber || ''}"></div>
-        <div class="form-group"><label class="form-label">الموقع</label><input class="form-control" id="eMedLocation" value="${med.location || ''}"></div>
       </div>
+      <div class="form-row cols-3">
+        <div class="form-group"><label class="form-label">وحدة الشراء</label><input class="form-control" id="eMedPurchaseUnit" value="${med.purchaseUnit||med.unit||'علبة'}"></div>
+        <div class="form-group"><label class="form-label">وحدة البيع</label><input class="form-control" id="eMedSaleUnit" value="${med.saleUnit||med.unit||'قرص'}"></div>
+        <div class="form-group"><label class="form-label">معامل التحويل</label><input class="form-control" id="eMedFactor" type="number" min="1" value="${med.conversionFactor||1}"></div>
+      </div>
+      <div class="form-row cols-2"><div class="form-group"><label class="form-label">الموقع</label><input class="form-control" id="eMedLocation" value="${med.location || ''}"></div><div class="form-group"><label class="form-label">التصنيف الرقابي</label><select class="form-control" id="eMedControlled"><option value="0">دواء عادي</option><option value="1" ${med.controlled?'selected':''}>خاضع للرقابة — يتطلب روشتة</option></select></div></div>
       <div class="form-group"><label class="form-label">الوصف</label><input class="form-control" id="eMedDescription" value="${med.description || ''}"></div>`;
 
     Modal.open({
@@ -843,10 +849,17 @@ const MedicinesPage = (() => {
         stock: Number(document.getElementById('eMedStock').value),
         minStock: Number(document.getElementById('eMedMin').value),
         expiry: document.getElementById('eMedExpiry').value,
-        barcode: document.getElementById('eMedBarcode').value.trim(),
+        barcode: document.getElementById('eMedCompanyBarcode').value.trim(),
+        companyBarcode: document.getElementById('eMedCompanyBarcode').value.trim(),
+        pharmacyBarcode: document.getElementById('eMedPharmacyBarcode').value.trim(),
+        purchaseUnit:document.getElementById('eMedPurchaseUnit').value.trim(),
+        saleUnit:document.getElementById('eMedSaleUnit').value.trim(),
+        conversionFactor:Math.max(1,parseInt(document.getElementById('eMedFactor').value)||1),
+        controlled:document.getElementById('eMedControlled').value==='1',
         location: document.getElementById('eMedLocation').value.trim(),
         description: document.getElementById('eMedDescription').value.trim(),
         supplierId: med.supplierId,
+        imageData: med.imageData,
       };
       if (!updated.name || !updated.category || !updated.expiry || !Number.isFinite(updated.price) || updated.price < 0 || !Number.isInteger(updated.stock) || updated.stock < 0) {
         Toast.err('بيانات غير صحيحة', 'راجع الحقول المطلوبة والقيم الرقمية');
