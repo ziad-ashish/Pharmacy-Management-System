@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>شفاء OS — إدارة الصيدلية</title>
+  <link rel="icon" href="assets/logo-mark.svg" type="image/svg+xml" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700;900&family=Amiri:wght@400;700&display=swap" rel="stylesheet" />
@@ -11,6 +12,7 @@
   <link rel="stylesheet" href="src/css/main.css" />
   <link rel="stylesheet" href="src/css/components.css" />
   <link rel="stylesheet" href="src/css/professional.css" />
+  <link rel="stylesheet" href="src/css/login.css" />
 </head>
 <body>
 
@@ -18,7 +20,7 @@
        LOGIN SCREEN
   ═══════════════════════════════════════ -->
   <div id="loginScreen" class="login-screen">
-    <div class="login-bg">
+    <div class="login-bg" aria-hidden="true">
       <div class="bg-deco deco-1"><i class="fas fa-prescription-bottle-medical"></i></div>
       <div class="bg-deco deco-2"><i class="fas fa-pills"></i></div>
       <div class="bg-deco deco-3"><i class="fas fa-heart-pulse"></i></div>
@@ -33,43 +35,48 @@
         </div>
         <form id="loginForm" class="login-form" autocomplete="on">
           <div class="form-group">
-            <label class="form-label">
-              <i class="fas fa-user-lock"></i> اسم المستخدم
+            <label class="form-label" for="loginUsername">
+              اسم المستخدم
             </label>
             <div class="input-wrap">
-              <i class="fas fa-user input-ico"></i>
-              <input type="text" id="loginUsername" class="form-input" name="username" autocomplete="username" placeholder="أدخل اسم المستخدم" autofocus />
+              <i class="fas fa-user input-ico" aria-hidden="true"></i>
+              <input type="text" id="loginUsername" class="form-input" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" aria-required="true" aria-describedby="loginErrorText" placeholder="أدخل اسم المستخدم" autofocus />
             </div>
           </div>
           <div class="form-group">
-            <label class="form-label">
-              <i class="fas fa-key"></i> كلمة المرور
+            <label class="form-label" for="loginPassword">
+              كلمة المرور
             </label>
             <div class="input-wrap">
-              <i class="fas fa-lock input-ico"></i>
-              <input type="password" id="loginPassword" class="form-input" name="password" autocomplete="current-password" placeholder="أدخل كلمة المرور" />
-              <button type="button" class="toggle-pwd" id="togglePwd" title="إظهار كلمة المرور">
-                <i class="fas fa-eye"></i>
+              <i class="fas fa-lock input-ico" aria-hidden="true"></i>
+              <input type="password" id="loginPassword" class="form-input" name="password" autocomplete="current-password" aria-required="true" aria-describedby="loginCapsLock loginErrorText" placeholder="أدخل كلمة المرور" />
+              <button type="button" class="toggle-pwd" id="togglePwd" title="إظهار كلمة المرور" aria-label="إظهار كلمة المرور" aria-pressed="false" aria-controls="loginPassword">
+                <i class="fas fa-eye" aria-hidden="true"></i>
               </button>
             </div>
+            <p id="loginCapsLock" class="login-hint hidden" role="status">تنبيه: مفتاح Caps Lock مفعّل.</p>
           </div>
           <div class="form-row">
             <label class="check-wrap">
               <input type="checkbox" id="rememberMe" />
-              <span class="check-box"><i class="fas fa-check"></i></span>
-              <span class="check-label">تذكرني</span>
+              <span class="check-box" aria-hidden="true"><i class="fas fa-check"></i></span>
+              <span class="check-label">تذكر اسم المستخدم</span>
             </label>
+            <button type="button" id="loginHelpBtn" class="login-help-btn" aria-controls="loginHelp" aria-expanded="false">مساعدة في الدخول</button>
           </div>
-          <div id="loginError" class="login-error hidden">
+          <div id="loginHelp" class="login-help hidden">
+            تأكد من لغة لوحة المفاتيح واسم المستخدم. إذا نسيت كلمة المرور، اطلب من مدير النظام إعادة تعيينها من إدارة المستخدمين. إذا كان حسابك هو حساب المدير الوحيد، تواصل مع مسؤول صيانة النظام؛ لا تحذف قاعدة البيانات.
+          </div>
+          <div id="loginError" class="login-error hidden" role="alert" aria-atomic="true">
             <i class="fas fa-circle-exclamation"></i>
             <span id="loginErrorText"></span>
           </div>
-          <button type="submit" class="btn-login" id="btnLogin">
-            <span class="btn-login-text">تسجيل الدخول</span>
-            <span class="btn-login-spin hidden"><i class="fas fa-spinner fa-spin"></i></span>
+          <button type="submit" class="btn-login" id="btnLogin" aria-label="تسجيل الدخول">
+            <span class="btn-login-text" role="status" aria-live="polite">تسجيل الدخول</span>
+            <span class="btn-login-spin hidden" aria-hidden="true"><i class="fas fa-spinner fa-spin"></i></span>
           </button>
         </form>
-        <div class="login-security"><i class="fas fa-shield-halved"></i> اتصال محلي آمن بقاعدة بيانات الصيدلية</div>
+        <div class="login-security"><i class="fas fa-shield-halved" aria-hidden="true"></i> للاستخدام بواسطة فريق الصيدلية فقط</div>
       </div>
       <div class="login-copy">
         <span>© 2026 صيدلية الشفاء — جميع الحقوق محفوظة</span>

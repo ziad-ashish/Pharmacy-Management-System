@@ -5,8 +5,9 @@
 # ══════════════════════════════════════════════════════════════
 
 import json
-from flask import request, jsonify
+from flask import request, jsonify, g
 from api import PharmacyAPI
+from server_auth import install_auth, COOKIE
 
 _api = PharmacyAPI()
 
@@ -19,6 +20,7 @@ def _resp(raw: str):
 
 def register_routes(app):
     """بتسجل كل الـ routes على الـ Flask app."""
+    install_auth(app)
 
     # ── MEDICINES ─────────────────────────────────────────────
     @app.route("/api/get_medicines")
@@ -155,7 +157,7 @@ def register_routes(app):
 
     @app.route("/api/import_medicines", methods=["POST"])
     def import_medicines():
-        uid=request.form.get("__user_id") or request.headers.get("X-User-Id")
+        uid=g.user_id
         uploaded=request.files.get("file")
         if uploaded: text=uploaded.read().decode("utf-8-sig")
         else: text=(request.get_json(silent=True) or {}).get("csv","")
@@ -248,7 +250,24 @@ def register_routes(app):
     @app.route("/api/login", methods=["POST"])
     def login():
         body = request.get_json(force=True) or {}
-        return _resp(_api.login(body.get("username",""), body.get("password","")))
+        if not isinstance(body, dict) or not all(isinstance(body.get(k, ""), str) for k in ("username", "password")):
+            return jsonify(ok=False, error="بيانات الدخول غير صالحة"), 400
+        result = json.loads(_api.login(body.get("username",""), body.get("password","")))
+        response = jsonify(result)
+        if result.get("ok"):
+            app.extensions["pharmacy_issue_session"](response, result["data"]["id"])
+        return response
+
+    @app.get("/api/current_session")
+    def current_session():
+        return _resp(_api.get_current_user(g.user_id))
+
+    @app.post("/api/logout")
+    def logout():
+        app.extensions["pharmacy_revoke_session"](audit=True)
+        response = jsonify(ok=True, data=None)
+        response.delete_cookie(COOKIE, path="/")
+        return response
 
     @app.route("/api/get_users")
     def get_users():
@@ -256,22 +275,28 @@ def register_routes(app):
 
     @app.route("/api/get_current_user/<uid>")
     def get_current_user(uid):
-        return _resp(_api.get_current_user(uid))
+        if uid != g.user_id:
+            return jsonify(ok=False, error="غير مصرح"), 403
+        return _resp(_api.get_current_user(g.user_id))
 
     @app.route("/api/change_password", methods=["POST"])
     def change_password():
         body = request.get_json(force=True) or {}
-        return _resp(_api.change_password(
-            body.get("uid",""),
+        result = json.loads(_api.change_password(
+            g.user_id,
             body.get("old_pwd",""),
             body.get("new_pwd","")
         ))
+        response = jsonify(result)
+        if result.get("ok"):
+            app.extensions["pharmacy_issue_session"](response, g.user_id)
+        return response
 
     @app.route("/api/check_permission", methods=["POST"])
     def check_permission():
         body = request.get_json(force=True) or {}
         return _resp(_api.check_permission(
-            body.get("user_id",""),
+            g.user_id,
             body.get("perm","")
         ))
 

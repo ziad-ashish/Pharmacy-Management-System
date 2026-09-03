@@ -559,6 +559,16 @@ const DB = {
     if (_IS_FLASK) return this._normUser(await _api('login', {body:{username,password}}));
     return this._normUser(await _LS.login(username, password));
   },
+  async getSession(uid) {
+    if (_IS_FLASK) {
+      const user = await _api('current_session');
+      return user ? this._normUser(user) : null;
+    }
+    return uid ? this.getCurrentUser(uid) : null;
+  },
+  async logout() {
+    if (_IS_FLASK) return _api('logout', {body:{}});
+  },
   async getUsers() {
     if (_IS_FLASK) return (await _api('get_users')).map(u=>this._normUser(u));
     return (await _LS.getUsers()).map(u=>this._normUser(u));

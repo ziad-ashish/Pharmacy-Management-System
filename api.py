@@ -1529,6 +1529,7 @@ class PharmacyAPI:
                 con.execute("UPDATE users SET password=? WHERE id=?", (new_hash, user["id"]))
             now_iso = now.isoformat()
             con.execute("UPDATE users SET last_login=? WHERE id=?", (now_iso, user["id"]))
+            _audit(con, user["id"], "LOGIN", "user", user["id"], "تسجيل دخول ناجح")
             con.commit()
             user.pop("password", None)
             # FIX [2.12]: flag default password
@@ -1555,6 +1556,10 @@ class PharmacyAPI:
         con.close(); return _ok(dict(row) if row else None)
 
     def change_password(self, uid: str, old_pwd: str, new_pwd: str):
+        if not isinstance(new_pwd, str) or len(new_pwd) < 8:
+            return _err("كلمة المرور يجب ألا تقل عن 8 أحرف")
+        if new_pwd == old_pwd:
+            return _err("اختر كلمة مرور مختلفة عن الحالية")
         try:
             con = _conn()
             row = con.execute("SELECT password FROM users WHERE id=?", (uid,)).fetchone()

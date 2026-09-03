@@ -1,0 +1,63 @@
+/* Login-only overrides: keep the pharmacy palette without affecting app forms. */
+.login-screen {
+  overflow-y: auto;
+  overflow-x: hidden;
+  align-items: flex-start;
+  padding: 24px 0;
+}
+.login-screen .login-wrap { width: 100%; max-width: 480px; margin: auto; padding: 16px; }
+.login-screen .login-card { padding: 32px; border-radius: 18px; }
+.login-screen .login-brand { margin-bottom: 28px; }
+.login-screen .login-icon { width: 64px; height: 64px; }
+.login-screen .login-title { font-size: 24px; line-height: 1.6; }
+.login-screen .login-sub { font-size: 14px; color: var(--tx-2); }
+.login-screen .login-form { gap: 20px; }
+.login-screen .form-group { margin: 0; }
+.login-screen .form-label { display: block; font-size: 14px; margin-bottom: 8px; color: var(--tx); }
+.login-screen .form-input {
+  min-height: 50px;
+  padding: 12px 44px;
+  font-size: 16px;
+  line-height: 1.5;
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--tx);
+}
+.login-screen .form-input::placeholder { color: var(--tx-2); opacity: .85; font-size: 14px; }
+.login-screen .input-ico { right: 16px; font-size: 15px; color: var(--tx-2); pointer-events: none; }
+.login-screen .toggle-pwd { left: 4px; width: 40px; height: 40px; color: var(--tx-2); }
+.login-screen .form-input:focus { background: var(--surface); border-color: var(--teal-500); }
+.login-screen .form-input[aria-invalid="true"] { border-color: var(--danger, #dc535f); }
+.login-screen .form-row { flex-wrap: wrap; gap: 12px; }
+.login-screen .check-wrap { position: relative; min-height: 36px; }
+.login-screen .check-wrap input {
+  display: block; position: absolute; width: 1px; height: 1px;
+  opacity: 0; clip-path: inset(50%);
+}
+.login-screen .check-wrap input:focus-visible + .check-box,
+.login-screen button:focus-visible { outline: 3px solid var(--teal-400); outline-offset: 3px; }
+.login-screen .check-label { font-size: 13px; color: var(--tx-2); }
+.login-screen .login-help-btn {
+  background: none; border: 0; padding: 6px 0; color: var(--teal-600);
+  font: inherit; font-size: 13px; cursor: pointer; text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.login-screen .login-help, .login-screen .login-hint, .login-screen .login-error {
+  font-size: 13px; line-height: 1.9;
+}
+.login-screen .login-help { padding: 12px; border: 1px solid var(--border); border-radius: 10px; color: var(--tx-2); }
+.login-screen .login-hint { margin: 8px 0 0; color: #b46d13; }
+.login-screen .btn-login { min-height: 50px; font-size: 16px; border-radius: 10px; display: flex; align-items: center; justify-content: center; gap: 10px; }
+.login-screen .btn-login:disabled { opacity: .8; cursor: wait; transform: none; }
+.login-screen .login-security { margin-top: 24px; padding-top: 18px; font-size: 12px; color: var(--tx-2); }
+.login-screen .login-copy { font-size: 12px; line-height: 1.8; color: #b7c9d1; }
+[data-theme="dark"] .login-screen .login-help-btn { color: #6bd5c9; }
+[data-theme="dark"] .login-screen .login-hint { color: #f4c777; }
+@media (max-width: 480px) {
+  .login-screen { padding: 8px 0; }
+  .login-screen .login-wrap { padding: 12px; }
+  .login-screen .login-card { padding: 24px 20px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .login-screen *, .login-screen *::before { animation: none !important; transition: none !important; }
+}

@@ -4,7 +4,7 @@
 'use strict';
 
 /* ════════════════════════════════════════════════════════════
-   AUTH  —  Session management (localStorage)
+   AUTH  —  UI cache only; HTTP sessions are verified by the server
 ════════════════════════════════════════════════════════════ */
 const Auth = (() => {
   const KEY = 'ph_auth_user';
@@ -14,18 +14,14 @@ const Auth = (() => {
     try { return raw ? JSON.parse(raw) : null; } catch { return null; }
   }
   function getCurrent() {
-    return _parse(sessionStorage.getItem(KEY)) || _parse(localStorage.getItem(KEY));
+    return _parse(sessionStorage.getItem(KEY));
   }
   function set(user, remember) {
     const json = JSON.stringify(user);
-    if (remember) {
-      localStorage.setItem(KEY, json);
-      sessionStorage.removeItem(KEY);
-      if (user.username) localStorage.setItem(LAST, user.username);
-    } else {
-      sessionStorage.setItem(KEY, json);
-      localStorage.removeItem(KEY);
-    }
+    sessionStorage.setItem(KEY, json);
+    localStorage.removeItem(KEY);
+    if (remember && user.username) localStorage.setItem(LAST, user.username);
+    else localStorage.removeItem(LAST);
     sessionStorage.removeItem('ph_auth_tmp');
   }
   function clear() {
@@ -40,7 +36,7 @@ const Auth = (() => {
     const u = getCurrent();
     return !!(u && u.id);
   }
-  function isRemembered() { return !!_parse(localStorage.getItem(KEY)); }
+  function isRemembered() { return !!lastUsername(); }
   return { getCurrent, set, clear, isLoggedIn, isRemembered, lastUsername };
 })();
 
@@ -67,22 +63,19 @@ const App = (() => {
     DB.seed();
     Theme.init();
 
-    if (!Auth.isLoggedIn()) {
-      _setupLogin();
-      return;
-    }
     // Never trust a stale browser session blindly. The account may have been
     // removed or its role changed since the previous launch.
     try {
       const cached = Auth.getCurrent();
-      const fresh = await DB.getCurrentUser(cached.id);
+      const fresh = await DB.getSession(cached?.id);
       if (!fresh?.id) {
         Auth.clear();
-        _setupLogin('انتهت الجلسة أو لم يعد الحساب موجودًا. سجل الدخول مرة أخرى.');
+        _setupLogin(cached ? 'انتهت الجلسة. سجل الدخول مرة أخرى.' : '');
         return;
       }
       Auth.set({ ...cached, ...fresh }, Auth.isRemembered());
     } catch (err) {
+      Auth.clear();
       _setupLogin(err.message || 'تعذر التحقق من جلسة الدخول');
       return;
     }
@@ -124,9 +117,9 @@ const App = (() => {
         size: 'sm',
         title: '<i class="fas fa-shield-halved"></i> تأمين الحساب',
         body: `<p class="form-hint" style="margin-bottom:1rem">أنت تستخدم كلمة المرور الافتراضية. نوصي بتغييرها لحماية بيانات الصيدلية، أو يمكنك التخطي الآن.</p>
-          <div class="form-group"><label>كلمة المرور الجديدة</label><input class="form-control" id="forcedNewPwd" type="password" minlength="8" autocomplete="new-password"></div>
-          <div class="form-group"><label>تأكيد كلمة المرور</label><input class="form-control" id="forcedConfirmPwd" type="password" minlength="8" autocomplete="new-password"></div>
-          <div id="forcedPwdError" class="form-error" style="display:none;margin-top:.7rem"></div>`,
+          <div class="form-group"><label for="forcedNewPwd">كلمة المرور الجديدة</label><input class="form-control" id="forcedNewPwd" type="password" minlength="8" autocomplete="new-password"></div>
+          <div class="form-group"><label for="forcedConfirmPwd">تأكيد كلمة المرور</label><input class="form-control" id="forcedConfirmPwd" type="password" minlength="8" autocomplete="new-password"></div>
+          <div id="forcedPwdError" class="form-error" role="alert" style="display:none;margin-top:.7rem"></div>`,
         foot: '<button class="btn btn-ghost" id="forcedPwdSkip">تخطي الآن</button><button class="btn btn-primary" id="forcedPwdSave"><i class="fas fa-lock"></i> تغيير كلمة المرور والمتابعة</button>'
       });
       const save = document.getElementById('forcedPwdSave');
@@ -207,10 +200,13 @@ const App = (() => {
     }
     function setLoading(loading) {
       loginBtn.disabled = loading;
-      btnText.classList.toggle('hidden', loading);
+      form.setAttribute('aria-busy', String(loading));
+      btnText.textContent = loading ? 'جارٍ التحقق من بيانات الدخول…' : 'تسجيل الدخول';
+      loginBtn.setAttribute('aria-label', btnText.textContent);
       btnSpin.classList.toggle('hidden', !loading);
-      loginBtn.style.opacity = loading ? .7 : '';
-      loginBtn.style.cursor = loading ? 'not-allowed' : '';
+      usernameInp.readOnly = loading;
+      passwordInp.readOnly = loading;
+      rememberMe.disabled = loading;
     }
 
     togglePwd?.addEventListener('click', () => {
@@ -218,16 +214,24 @@ const App = (() => {
       passwordInp.type = isPwd ? 'text' : 'password';
       togglePwd.querySelector('i').className = isPwd ? 'fas fa-eye-slash' : 'fas fa-eye';
       togglePwd.title = isPwd ? 'إخفاء كلمة المرور' : 'إظهار كلمة المرور';
+      togglePwd.setAttribute('aria-label', togglePwd.title);
+      togglePwd.setAttribute('aria-pressed', String(isPwd));
       passwordInp.focus();
     });
 
-    document.querySelectorAll('.cred-item[data-user]').forEach(item => {
-      item.addEventListener('click', () => {
-        usernameInp.value = item.dataset.user || '';
-        passwordInp.value = item.dataset.pass || '';
-        errBox.classList.add('hidden');
-        passwordInp.focus();
-      });
+    const capsHint = document.getElementById('loginCapsLock');
+    ['keydown', 'keyup'].forEach(type => passwordInp.addEventListener(type, e => {
+      capsHint?.classList.toggle('hidden', !e.getModifierState?.('CapsLock'));
+    }));
+    passwordInp.addEventListener('blur', () => capsHint?.classList.add('hidden'));
+    [usernameInp, passwordInp].forEach(input => input.addEventListener('input', () => {
+      errBox.classList.add('hidden');
+      input.removeAttribute('aria-invalid');
+    }));
+    document.getElementById('loginHelpBtn')?.addEventListener('click', () => {
+      const help = document.getElementById('loginHelp');
+      const expanded = help.classList.toggle('hidden') === false;
+      document.getElementById('loginHelpBtn').setAttribute('aria-expanded', String(expanded));
     });
 
     form.addEventListener('submit', async e => {
@@ -237,6 +241,9 @@ const App = (() => {
       const password = passwordInp.value;
       if (!username || !password) {
         showErr('يرجى إدخال اسم المستخدم وكلمة المرور');
+        const missing = !username ? usernameInp : passwordInp;
+        missing.setAttribute('aria-invalid', 'true');
+        missing.focus();
         return;
       }
       loginInFlight = true;
@@ -246,12 +253,15 @@ const App = (() => {
         const user = await DB.login(username, password);
         if (!user || !user.id) throw new Error('فشل تسجيل الدخول');
         Auth.set(user, rememberMe.checked);
-        if (user.isDefaultPassword) await _forcePasswordChange(user, password, rememberMe.checked);
+        if (user.isDefaultPassword) {
+          btnText.textContent = 'في انتظار اختيارك لتأمين الحساب…';
+          await _forcePasswordChange(user, password, rememberMe.checked);
+        }
         passwordInp.value = '';
         setLoading(false);
         loginInFlight = false;
         Toast.ok(`مرحباً ${user.fullName || user.username}`);
-        setTimeout(() => _enterApp(), 250);
+        _enterApp();
       } catch (err) {
         setLoading(false);
         loginInFlight = false;
@@ -267,10 +277,14 @@ const App = (() => {
     Modal.confirm(
       'تسجيل الخروج',
       'هل أنت متأكد من تسجيل الخروج من النظام؟',
-      () => {
-        Auth.clear();
-        Toast.info('تم تسجيل الخروج بنجاح');
-        setTimeout(() => location.reload(), 300);
+      async () => {
+        try {
+          await DB.logout();
+          Auth.clear();
+          location.reload();
+        } catch (err) {
+          Toast.err('تعذر تسجيل الخروج', err.message);
+        }
       },
       'تأكيد الخروج',
       'btn-amber'
@@ -450,21 +464,9 @@ const App = (() => {
   /* ── SPLASH ── */
   function _runSplash(cb) {
     const splash = document.getElementById('splashScreen');
-    const fill   = document.getElementById('splashFill');
-    const pct    = document.getElementById('splashPct');
-    if (!splash) { cb(); return; }
-    let p = 0;
-    const step = () => {
-      p = Math.min(p + Math.random()*14 + 6, 100);
-      if (fill) fill.style.width = p + '%';
-      if (pct)  pct.textContent  = Math.round(p) + '%';
-      if (p < 100) setTimeout(step, 70 + Math.random()*50);
-      else setTimeout(()=>{
-        splash.classList.add('out');
-        setTimeout(()=>{ splash.remove(); cb(); }, 440);
-      }, 150);
-    };
-    setTimeout(step, 280);
+    // Authentication is finished; don't add a fabricated progress animation.
+    splash?.classList.add('hidden');
+    cb();
   }
 
   /* ── NAVIGATION ── */
