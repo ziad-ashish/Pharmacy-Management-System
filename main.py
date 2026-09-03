@@ -27,6 +27,7 @@ def _backup_worker():
 def create_app():
     """Create the local web application used by the desktop window."""
     app = Flask(__name__, static_folder=BASE_DIR, static_url_path="")
+    app.config['MAX_CONTENT_LENGTH'] = 8 * 1024 * 1024
     register_routes(app)
 
     @app.get("/")

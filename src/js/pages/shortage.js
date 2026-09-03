@@ -137,7 +137,7 @@ const ShortagePage = (() => {
         const isOut = m.stock === 0;
         const stars = sup ? '★'.repeat(Math.min(sup.rating, 5)) + '☆'.repeat(5 - Math.min(sup.rating, 5)) : '—';
         return `<tr>
-          <td><input type="checkbox" class="sh-chk" data-id="${m.id}" data-name="${m.name}" data-cost="${m.cost}" data-supplier="${m.supplierId || ''}"></td>
+          <td><input type="checkbox" class="sh-chk" data-id="${m.id}" data-name="${m.name}" data-cost="${m.cost*(m.conversionFactor||1)}" data-supplier="${m.supplierId || ''}"></td>
           <td class="font-bold">${m.name}</td>
           <td>${m.category}</td>
           <td style="font-weight:700;color:${isOut ? 'var(--err)' : 'var(--warn)'}">${m.stock} ${m.unit}</td>
@@ -197,11 +197,11 @@ const ShortagePage = (() => {
               </select>
             </label>
             <table class="dtable">
-              <thead><tr><th>الدواء</th><th>الكمية المطلوبة</th><th>سعر الوحدة</th></tr></thead>
+              <thead><tr><th>الدواء</th><th>عدد وحدات الشراء</th><th>تكلفة وحدة الشراء</th></tr></thead>
               <tbody>
                 ${items.map((item, ii) => `<tr>
-                  <td>${item.med_name}</td>
-                  <td><input type="number" min="1" value="${_meds.find(m=>m.id===item.med_id)?.minStock||10}"
+                  <td>${item.med_name}<small style="display:block">${_meds.find(m=>m.id===item.med_id)?.purchaseUnit||"وحدة شراء"}</small></td>
+                  <td><input type="number" min="1" value="${Math.max(1,Math.ceil(((_meds.find(m=>m.id===item.med_id)?.minStock||10)-(_meds.find(m=>m.id===item.med_id)?.stock||0))/(_meds.find(m=>m.id===item.med_id)?.conversionFactor||1)))}"
                       class="form-control po-qty-inp" style="width:80px"
                       data-group="${idx}" data-ii="${ii}" data-med="${item.med_id}" data-name="${item.med_name}"></td>
                   <td><input type="number" min="0" step="0.01" value="${item.cost}"
@@ -239,7 +239,7 @@ const ShortagePage = (() => {
         const items    = qtyInps.map((inp, ii) => ({
           med_id:      inp.dataset.med,
           med_name:    inp.dataset.name,
-          qty_ordered: parseInt(inp.value) || 1,
+          qty_ordered: Number(inp.value),
           unit_cost:   parseFloat(costInps[ii]?.value) || 0,
         })).filter(i => i.qty_ordered > 0);
         return { supplier_id: sel.value, items };

@@ -65,6 +65,7 @@ const Modal = (() => {
 
   function close(force=false) {
     if (_locked && !force) return;
+    if (typeof CameraStudio !== 'undefined') CameraStudio.close();
     const overlay = document.getElementById('gOverlay');
     const modal   = document.getElementById('gModal');
     if (!modal) return;

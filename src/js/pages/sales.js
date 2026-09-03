@@ -11,6 +11,7 @@ const SalesPage = (() => {
   let _search    = '';
   let _allMeds   = [];
   let _prescription = null;
+  let _rxDraft = null, _draftPatient = null, _restoring = true, _checkoutBusy = false;
   let _useLoyalty = false;
   let _pharmacyName = 'صيدلية الشفاء';
   let _pharmacyLogo = '';
@@ -34,7 +35,7 @@ const SalesPage = (() => {
         <div class="pg-title-icon" style="background:var(--teal-50);color:var(--teal-500)"><i class="fas fa-cash-register"></i></div>
         نقطة البيع
       </h1>
-      <p class="pg-subtitle">إنشاء فاتورة مبيعات جديدة</p>
+      <p class="pg-subtitle">إنشاء فاتورة مبيعات جديدة</p><small id="posDraftStatus" role="status">جارٍ استرجاع المسودة…</small>
     </div>
     <div class="pg-actions">
       <button class="btn btn-ghost btn-sm" onclick="App.navigate('invoices')">
@@ -47,6 +48,7 @@ const SalesPage = (() => {
     <!-- Products -->
     <div class="pos-prods">
       <div class="pos-prods-head">
+        <button type="button" class="btn btn-ghost" id="posCameraBtn"><i class="fas fa-camera"></i> مسح بالكاميرا</button>
         <div class="tb-srch" style="flex:1">
           <i class="fas fa-magnifying-glass"></i>
           <input type="search" id="posSearch" placeholder="بحث عن دواء..." />
@@ -116,7 +118,7 @@ const SalesPage = (() => {
   }
 
   async function afterRender() {
-    _cart = []; _discount = 0; _payMethod = 'نقدي'; _prescription = null; _useLoyalty=false;
+    _restoring=true; _cart = []; _discount = 0; _payMethod = 'نقدي'; _prescription = null; _rxDraft=null; _draftPatient=null; _useLoyalty=false; _checkoutBusy=false;
     // الصفر هو الوضع الآمن. لا توجد ضريبة إلا إذا قرأنا قيمة موجبة محفوظة فعلياً.
     TAX_RATE = 0;
     _showTax = false;
@@ -203,23 +205,53 @@ const SalesPage = (() => {
         _payMethod = btn.dataset.pm;
         document.querySelectorAll('.pay-btn').forEach(b=>b.classList.remove('sel'));
         btn.classList.add('sel');
+        _persistDraft();
       });
     });
 
     document.getElementById('checkoutBtn')?.addEventListener('click', checkout);
+    document.getElementById('posCameraBtn')?.addEventListener('click',()=>CameraWorkflows.scan({title:'مسح صنف للبيع',context:'sale',allowAuto:true,acceptLabel:'إضافة للسلة',onAccept:async med=>{
+      const current=await DB.getMedicine(med.id);const index=_allMeds.findIndex(m=>m.id===med.id);
+      if(index<0)_allMeds.push(current);else _allMeds[index]=current;
+      if(!addToCart(med.id,med.scanQuantity))throw new Error('لم تتم الإضافة. راجع المخزون والكمية المطلوبة.');
+    }}));
     document.getElementById('addPrescriptionBtn')?.addEventListener('click', _openPrescriptionModal);
     document.getElementById('posPatient')?.addEventListener('change', async e=>{
-      if(!e.target.value) return;
+      _draftPatient=e.target.value||null; _useLoyalty=false; document.getElementById('useLoyalty').checked=false; _persistDraft();
+      if(!e.target.value){document.getElementById('loyaltyOption').style.display='none';return;}
       try {
         const [debt,loyalty]=await Promise.all([DB.getPatientDebt(e.target.value),DB.getLoyalty(e.target.value)]);
         if(debt.balance>0) Toast.warn('تنبيه مديونية',`على العميل دين سابق بقيمة ${Fmt.money(debt.balance)}`);
         const option=document.getElementById('loyaltyOption'); if(option){option.style.display=loyalty.points>0?'block':'none';option.title=`الرصيد ${Number(loyalty.points).toFixed(2)} نقطة`;}
       } catch(_){}
     });
-    document.getElementById('useLoyalty')?.addEventListener('change',e=>_useLoyalty=e.target.checked);
+    document.getElementById('useLoyalty')?.addEventListener('change',e=>{_useLoyalty=e.target.checked;_persistDraft();});
 
     _setupBarcodeScanner();
     _setupKeyboardShortcuts();
+    try {
+      const saved=await PosDraft.load();
+      if(saved) {
+        _cart=saved.cart||[];_discount=Number(saved.discount)||0;_payMethod=saved.paymentMethod||_payMethod;
+        _prescription=saved.prescription||null;_rxDraft=saved.prescriptionDraft||null;_draftPatient=saved.patientId||null;_useLoyalty=!!saved.useLoyalty;
+        const needed=await Promise.all(_cart.map(item=>DB.getMedicine(item.medId)));
+        for(const med of needed.filter(Boolean)){const index=_allMeds.findIndex(m=>m.id===med.id);if(index<0)_allMeds.push(med);else _allMeds[index]=med;}
+        document.getElementById('discountInput').value=_discount;
+        document.getElementById('posPatient').value=_draftPatient||'';
+        document.querySelectorAll('.pay-btn').forEach(b=>b.classList.toggle('sel',b.dataset.pm===_payMethod));
+        document.getElementById('loyaltyOption').style.display=_draftPatient?'':'none';
+        document.getElementById('useLoyalty').checked=_useLoyalty;
+        if(_prescription){const label=document.getElementById('prescriptionStatus');label.style.display='block';label.textContent='روشتة مرتبطة بالمسودة';}
+        if(_cart.length||_rxDraft)Toast.info('تم استرجاع المسودة','راجع الكميات والأسعار الحالية قبل إصدار الفاتورة');
+      }
+      updateCartUI();renderGrid();_restoring=false;
+    }catch(error){document.getElementById('posDraftStatus').textContent='تعذر استرجاع المسودة: '+error.message;Toast.err('تعذر فتح المسودة',error.message);}
+  }
+
+  function _persistDraft() {
+    if(_restoring)return;
+    PosDraft.save({cart:_cart,discount:_discount,paymentMethod:_payMethod,patientId:_draftPatient,
+      prescription:_prescription,prescriptionDraft:_rxDraft,useLoyalty:_useLoyalty});
   }
 
   function _setupKeyboardShortcuts(){
@@ -248,34 +280,44 @@ const SalesPage = (() => {
       _allMeds.find(m=>String(m.id).toLowerCase()===c.toLowerCase());
   }
   async function _resolveBarcode(code){
-    const local=_findByBarcode(code); if(local)return local;
     try{
-      const remote=await DB.getMedicineByBarcode(String(code||'').trim());
-      if(remote&&!_allMeds.some(m=>m.id===remote.id))_allMeds.push(remote);
+      const remote=await CameraWorkflows.resolve(String(code||'').trim());
+      if(remote?.scanRequiresConfiguration){Toast.warn('وحدة الباركود غير محددة','افتح الأدوية ← ضبط وحدات الباركود وحدد عدد وحدات البيع في العبوة');return null;}
+      if(remote){const index=_allMeds.findIndex(m=>m.id===remote.id);if(index<0)_allMeds.push(remote);else _allMeds[index]=remote;}
       return remote;
     }catch(_){return null;}
   }
 
   function _openPrescriptionModal() {
+    const rx=_rxDraft||_prescription;
     Modal.open({
       title:'<i class="fas fa-file-prescription"></i> بيانات الروشتة', size:'sm',
       body:`<div class="form-grid cols-2">
-        <div class="form-group"><label>اسم الطبيب *</label><input class="form-control" id="rxDoctor" value="${_esc(_prescription?.doctor_name||'')}"></div>
-        <div class="form-group"><label>رقم الترخيص *</label><input class="form-control" id="rxLicense" value="${_esc(_prescription?.doctor_license||'')}"></div>
+        <div class="form-group"><label>اسم الطبيب *</label><input class="form-control" id="rxDoctor" value="${_esc(rx?.doctor_name||'')}"></div>
+        <div class="form-group"><label>رقم الترخيص *</label><input class="form-control" id="rxLicense" value="${_esc(rx?.doctor_license||'')}"></div>
         <div class="form-group"><label>نوع الروشتة *</label><select class="form-control" id="rxType"><option>عادية</option><option>مخدرات</option><option>جدول</option><option>مزمنة</option></select></div>
-        <div class="form-group"><label>تاريخ الروشتة</label><input class="form-control" id="rxDate" type="date" value="${_prescription?.date||new Date().toISOString().slice(0,10)}"></div>
-      </div><div class="form-group"><label>صورة الروشتة (اختياري)</label><input class="form-control" id="rxImage" type="file" accept="image/*" capture="environment"></div>`,
+        <div class="form-group"><label>تاريخ الروشتة</label><input class="form-control" id="rxDate" type="date" value="${rx?.date||new Date().toISOString().slice(0,10)}"></div>
+      </div><div id="rxAlbum"></div>`,
       foot:'<button class="btn btn-ghost" onclick="Modal.close()">إلغاء</button><button class="btn btn-primary" id="saveRxBtn"><i class="fas fa-check"></i> ربط الروشتة</button>'
     });
-    if (_prescription?.prescription_type) document.getElementById('rxType').value=_prescription.prescription_type;
+    if (rx?.prescription_type) document.getElementById('rxType').value=rx.prescription_type;
+    let rxImages=rx?.images||(rx?.image_data?[rx.image_data]:[]);
+    const saveEditing=()=>{
+      _prescription=null; // Editing requires reconfirmation; don't duplicate five image pages in the draft.
+      const hint=document.getElementById('prescriptionStatus');hint.style.display='block';hint.textContent='تعديلات الروشتة محفوظة كمسودة؛ يلزم ربطها قبل إصدار الفاتورة';
+      _rxDraft={doctor_name:document.getElementById('rxDoctor').value,doctor_license:document.getElementById('rxLicense').value,
+        prescription_type:document.getElementById('rxType').value,date:document.getElementById('rxDate').value,images:rxImages};
+      _persistDraft();
+    };
+    const album=CameraWorkflows.album(document.getElementById('rxAlbum'),rxImages,images=>{rxImages=images;saveEditing();});
+    ['rxDoctor','rxLicense','rxType','rxDate'].forEach(id=>document.getElementById(id).addEventListener('input',saveEditing));
     document.getElementById('saveRxBtn')?.addEventListener('click', async()=>{
       const doctor_name=document.getElementById('rxDoctor').value.trim();
       const doctor_license=document.getElementById('rxLicense').value.trim();
       if(!doctor_name||!doctor_license){ Toast.warn('بيانات ناقصة','اسم الطبيب ورقم الترخيص مطلوبان'); return; }
-      let image_data=_prescription?.image_data||null;
-      const file=document.getElementById('rxImage').files?.[0];
-      if(file) image_data=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=reject;r.readAsDataURL(file);});
-      _prescription={doctor_name,doctor_license,prescription_type:document.getElementById('rxType').value,date:document.getElementById('rxDate').value,image_data};
+      let images;try{images=album.images();}catch(e){Toast.warn(e.message);return;}
+      _prescription={doctor_name,doctor_license,prescription_type:document.getElementById('rxType').value,date:document.getElementById('rxDate').value,images};
+      _rxDraft=null;_persistDraft();
       const status=document.getElementById('prescriptionStatus');
       if(status){status.style.display='block';status.innerHTML=`<i class="fas fa-circle-check"></i> روشتة د. ${_esc(doctor_name)} مرتبطة بالفاتورة`;}
       document.getElementById('addPrescriptionBtn').innerHTML='<i class="fas fa-pen"></i> تعديل الروشتة';
@@ -298,7 +340,7 @@ const SalesPage = (() => {
             const med = await _resolveBarcode(val);
             if (med) {
               e.preventDefault();
-              addToCart(med.id);
+              addToCart(med.id,med.scanQuantity||1);
               searchInput.value = '';
               _search = '';
               renderGrid();
@@ -333,7 +375,7 @@ const SalesPage = (() => {
           const med = await _resolveBarcode(code);
           if (med) {
             e.preventDefault();
-            addToCart(med.id);
+            addToCart(med.id,med.scanQuantity||1);
             if (isSearchBox && searchInput) {
               searchInput.value = '';
               _search = '';
@@ -386,13 +428,13 @@ const SalesPage = (() => {
 
     _keyboardIndex=-1;
     grid.innerHTML = meds.map(m=>{
-      const oos = m.stock===0;
+      const oos = (m.sellableStock??m.stock)===0;
       const low = m.stock>0 && m.stock<=m.minStock;
       return `
       <div class="med-card ${oos?'oos':''}" data-mid="${m.id}">
         ${oos?'<span class="oos-badge">نفد</span>':''}
         ${low?'<span class="low-badge">منخفض</span>':''}
-        <div class="med-card-ico"><i class="fas fa-capsules"></i></div>
+        <div class="med-card-ico">${m.imageUrl?`<img loading="lazy" src="${m.imageUrl}" alt="" style="width:42px;height:42px;object-fit:contain">`:'<i class="fas fa-capsules"></i>'}</div>
         <div class="med-card-nm">${m.name}</div>
         <div class="med-card-cat">${m.category}</div>
         <div class="med-card-ft">
@@ -407,18 +449,20 @@ const SalesPage = (() => {
     });
   }
 
-  function addToCart(medId) {
+  function addToCart(medId, quantity=1) {
+    if(_checkoutBusy||_restoring)return false;
     const med = _allMeds.find(m=>m.id===medId);
-    if (!med || med.stock===0) return;
+    if (!med || (med.sellableStock??med.stock)<quantity || !Number.isInteger(quantity) || quantity<1) return false;
     const existing = _cart.find(i=>i.medId===medId);
     if (existing) {
-      if (existing.qty >= med.stock) { Toast.warn('تنبيه',`لا يوجد مخزون كافٍ (${med.stock} فقط)`); return; }
-      existing.qty++; existing.total = existing.qty * existing.price;
+      if (existing.qty+quantity > (med.sellableStock??med.stock)) { Toast.warn('تنبيه',`لا يوجد مخزون كافٍ (${med.stock} فقط)`); return false; }
+      existing.qty+=quantity; existing.total = existing.qty * existing.price;
     } else {
-      _cart.push({ medId, name:med.name, qty:1, price:med.price, total:med.price, unit:med.saleUnit||med.unit, controlled:med.controlled });
+      _cart.push({ medId, name:med.name, qty:quantity, price:med.price, total:med.price*quantity, unit:med.saleUnit||med.unit, controlled:med.controlled });
     }
     updateCartUI();
     Toast.info('', `تمت إضافة ${med.name}`, 1200);
+    return true;
   }
 
   function removeFromCart(medId) { _cart=_cart.filter(i=>i.medId!==medId); updateCartUI(); }
@@ -427,7 +471,7 @@ const SalesPage = (() => {
     const item = _cart.find(i=>i.medId===medId);
     if (!item) return;
     const med = _allMeds.find(m=>m.id===medId);
-    item.qty  = Math.max(1, Math.min(item.qty+delta, med?.stock||999));
+    item.qty  = Math.max(1, Math.min(item.qty+delta, med?.sellableStock??med?.stock??0));
     item.total= item.qty * item.price;
     updateCartUI();
   }
@@ -470,6 +514,7 @@ const SalesPage = (() => {
     const disc = Math.min(_discount, sub);
     const tax  = (sub-disc)*TAX_RATE;
     const tot  = (sub-disc)+tax;
+    _persistDraft();
     const el = id => document.getElementById(id);
     if (el('crSub'))   el('crSub').textContent   = Fmt.money(sub);
     if (el('crTax'))   el('crTax').textContent   = Fmt.money(tax);
@@ -488,12 +533,23 @@ const SalesPage = (() => {
     const tax   = (sub-disc)*TAX_RATE;
     const total = (sub-disc)+tax;
     const patId = document.getElementById('posPatient')?.value||null;
-    const patient= patId ? (await DB.getPatient(patId)) : null;
+    if(_checkoutBusy)return;
+    _checkoutBusy=true;
+    const page=document.getElementById('page-sales');page.inert=true;
     // FIX: use the actually logged-in user's name instead of a hardcoded doctor name
     const cashierName = Auth?.getCurrent?.()?.fullName || '';
 
     try {
+      _persistDraft();
+      const draftMeta=await PosDraft.flush();
+      const patient=patId ? await DB.getPatient(patId) : null;
+      const current=await Promise.all(_cart.map(item=>DB.getMedicine(item.medId)));
+      for(let i=0;i<_cart.length;i++){
+        if(!current[i]||(current[i].sellableStock??current[i].stock)<_cart[i].qty)throw new Error('المخزون تغيّر؛ راجع كميات السلة');
+        if(current[i].price!==_cart[i].price)throw new Error('سعر '+_cart[i].name+' تغيّر؛ احذف الصنف وأضفه بالسعر الحالي');
+      }
       const result = await DB.addSale({
+        ...draftMeta,
         patientId:   patId,
         patientName: patient?.name||'عميل عادي',
         items:       _cart.map(i=>({medId:i.medId,name:i.name,qty:i.qty,price:i.price,total:i.total})),
@@ -528,14 +584,19 @@ const SalesPage = (() => {
       }
 
       Toast.ok('تمت العملية', `تم إصدار ${result.invoiceNum} بقيمة ${Fmt.money(result.total??total)}`);
-      _cart=[]; _discount=0; _prescription=null;
+      PosDraft.completed();_restoring=true;
+      _cart=[]; _discount=0; _prescription=null;_rxDraft=null;_draftPatient=null;_useLoyalty=false;
+      document.getElementById('prescriptionStatus').style.display='none';
+      document.getElementById('addPrescriptionBtn').innerHTML='<i class="fas fa-file-prescription"></i> إضافة روشتة';
+      document.getElementById('useLoyalty').checked=false;document.getElementById('loyaltyOption').style.display='none';
       const di=document.getElementById('discountInput'); if(di) di.value='0';
       const pp=document.getElementById('posPatient');    if(pp) pp.value='';
 
       // refresh meds stock
-      const meds = await DB.getMedicines(); _allMeds = meds;
+      const meds = await DB.getTopSellingMeds(50); _allMeds = meds;
       updateCartUI(); renderGrid();
     } catch(e) { Toast.err('خطأ في الحفظ', e.message); }
+    finally {_checkoutBusy=false;_restoring=false;page.inert=false;}
   }
 
   function _buildReceipt(s) {

@@ -270,10 +270,17 @@ const InvoicesPage = (() => {
       size: 'sm',
       body: `<div id="invRcpPrint">${_receipt(s)}</div>`,
       foot: `
+        <button type="button" class="btn btn-ghost" id="invoiceRxBtn">صور الروشتة</button>
+        <button type="button" class="btn btn-ghost" id="invoiceScanBtn">فحص صنف بالكاميرا</button>
         <button class="btn btn-primary" onclick="printElement('invRcpPrint')"><i class="fas fa-print"></i> طباعة</button>
         ${s.status !== 'ملغاة' ? `<button class="btn btn-ghost" style="color:var(--err)" id="voidFromViewBtn"><i class="fas fa-ban"></i> إلغاء</button>` : ''}
         <button class="btn btn-ghost" onclick="Modal.close()">إغلاق</button>`,
     });
+    document.getElementById('invoiceRxBtn')?.addEventListener('click',()=>CameraWorkflows.viewPrescription(s.id));
+    document.getElementById('invoiceScanBtn')?.addEventListener('click',()=>CameraWorkflows.scan({title:'مطابقة الصنف بالفاتورة',lookup:med=>{
+      const item=s.items.find(i=>i.medId===med.id);
+      return {med,title:med.name,detail:item?`موجود بالفاتورة · الكمية الأصلية: ${item.qty}`:'الصنف غير موجود في هذه الفاتورة',disabled:!item,warning:'الفحص لا يُنفّذ مرتجعًا ولا يعدّل الفاتورة.'};
+    },acceptLabel:'تمت المراجعة',onAccept:async()=>{}}));
     document.getElementById('voidFromViewBtn')?.addEventListener('click', () => {
       Modal.close();
       _confirmVoid(s.id, s.invoiceNum);

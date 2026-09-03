@@ -473,6 +473,8 @@ const App = (() => {
   function navigate(pageId) {
     const pg = pages[pageId];
     if (!pg) return;
+    CameraStudio.close();
+    document.dispatchEvent(new Event('pharmacy:navigate'));
 
     const host = document.getElementById('pageHost');
     if (!host) return;

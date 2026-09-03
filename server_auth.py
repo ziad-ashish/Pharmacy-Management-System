@@ -86,6 +86,11 @@ def install_auth(app):
                     return jsonify(ok=True, data=None)
                 return jsonify(ok=False, error="انتهت جلسة الدخول. سجّل الدخول مرة أخرى."), 401
             g.user_id = entry["uid"]
+        if request.endpoint in {'backup_database','restore_database','list_backups'}:
+            with closing(api._conn()) as con:
+                role=con.execute('SELECT role FROM users WHERE id=?',(g.user_id,)).fetchone()
+                if not role or role[0]!='مدير النظام':
+                    return jsonify(ok=False,error='النسخ والاستعادة لمدير النظام فقط'),403
         # Existing routes share the cached JSON dictionary; audit identity is
         # always supplied by the server, never by localStorage or a request ID.
         if request.method == "POST" and request.is_json:

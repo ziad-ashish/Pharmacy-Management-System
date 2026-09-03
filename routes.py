@@ -21,6 +21,12 @@ def _resp(raw: str):
 def register_routes(app):
     """بتسجل كل الـ routes على الـ Flask app."""
     install_auth(app)
+    from camera_api import register_camera_routes
+    register_camera_routes(app)
+    from pharmacy_ops import register_routes as register_operations_routes
+    register_operations_routes(app)
+    from backup_store import register_routes as register_backup_routes
+    register_backup_routes(app)
 
     # ── MEDICINES ─────────────────────────────────────────────
     @app.route("/api/get_medicines")
@@ -29,7 +35,7 @@ def register_routes(app):
 
     @app.route("/api/get_medicine/<mid>")
     def get_medicine(mid):
-        return _resp(_api.get_medicine(mid))
+        return _resp(_api.get_medicine(mid, include_image=request.args.get('image')=='1'))
 
     @app.route("/api/get_medicine_by_barcode/<path:barcode>")
     def get_medicine_by_barcode(barcode):
@@ -224,7 +230,7 @@ def register_routes(app):
     # ── BACKUP ────────────────────────────────────────────────
     @app.route("/api/backup_database", methods=["POST"])
     def backup_database():
-        return _resp(_api.backup_database())
+        return _resp(_api.backup_database(g.user_id))
 
     @app.route("/api/get_backup_status")
     def get_backup_status():

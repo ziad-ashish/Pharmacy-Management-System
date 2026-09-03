@@ -22,6 +22,7 @@ const MedicinesPage = (() => {
       <p class="pg-subtitle">إدارة كامل المخزون الدوائي</p>
     </div>
     <div class="pg-actions">
+      <button type="button" class="btn btn-ghost" id="medCountBtn"><i class="fas fa-camera"></i> الجرد بالكاميرا</button>
       <input type="file" id="medImportFile" accept=".csv,text/csv" hidden>
       <button class="btn btn-ghost btn-sm" id="medTemplateBtn"><i class="fas fa-file-arrow-down"></i> قالب CSV</button>
       <button class="btn btn-ghost btn-sm" id="medImportBtn"><i class="fas fa-file-import"></i> استيراد CSV</button>
@@ -85,6 +86,7 @@ const MedicinesPage = (() => {
   }
 
   async function afterRender() {
+    document.getElementById('medCountBtn')?.addEventListener('click',()=>CameraWorkflows.count());
     document.getElementById('medAddBtn')?.addEventListener('click', openAddModal);
     document.getElementById('medExportBtn')?.addEventListener('click', exportData);
     document.getElementById('medImportBtn')?.addEventListener('click',()=>document.getElementById('medImportFile')?.click());
@@ -203,6 +205,7 @@ const MedicinesPage = (() => {
           <td>${m.location || '—'}</td>
           <td>
             <div class="td-actions">
+              <button class="btn btn-ghost btn-icon sm" data-action="units" data-id="${m.id}" title="ضبط وحدات الباركود" aria-label="ضبط وحدات الباركود"><i class="fas fa-barcode"></i></button>
               <button class="btn btn-ghost btn-icon sm" data-action="edit" data-id="${m.id}" title="تعديل"><i class="fas fa-pen"></i></button>
               <button class="btn btn-ghost btn-icon sm" data-action="delete" data-id="${m.id}" title="حذف"><i class="fas fa-trash"></i></button>
             </div>
@@ -213,6 +216,7 @@ const MedicinesPage = (() => {
         btn.addEventListener('click', ()=>{
           const m = _allMeds.find(x=>x.id===btn.dataset.id);
           if (!m) return;
+          if (btn.dataset.action==='units') CameraWorkflows.configureUnits(m.id);
           if (btn.dataset.action==='edit')  editMedicine(m);
           if (btn.dataset.action==='delete') deleteMedicine(m.id);
         });
@@ -520,18 +524,13 @@ const MedicinesPage = (() => {
       if (e.target.closest('#imgRemoveBtn')) return;
       imgInput?.click();
     });
-    imgInput?.addEventListener('change', e => {
+    const photoBtn=document.createElement('button');photoBtn.type='button';photoBtn.className='btn btn-ghost';photoBtn.textContent='تصوير المنتج';imgArea?.after(photoBtn);
+    const usePhoto=image=>{_savedImage=image;imgPreview.src=image;imgPreview.style.display='block';imgHolder.style.display='none';imgRemove.style.display='flex';};
+    photoBtn.onclick=()=>CameraStudio.open({title:'تصوير صورة الدواء',onPhoto:async image=>usePhoto(image)});
+    imgInput?.addEventListener('change', async e => {
       const file = e.target.files?.[0];
       if (!file) return;
-      const reader = new FileReader();
-      reader.onload = ev => {
-        _savedImage = ev.target.result;
-        imgPreview.src = _savedImage;
-        imgPreview.style.display  = 'block';
-        imgHolder.style.display   = 'none';
-        imgRemove.style.display   = 'flex';
-      };
-      reader.readAsDataURL(file);
+      try{usePhoto(await CameraStudio.compressFile(file));}catch(err){Toast.err('تعذر إضافة الصورة',err.message);}
     });
     imgRemove?.addEventListener('click', () => {
       _savedImage = null;

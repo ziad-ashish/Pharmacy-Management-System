@@ -22,6 +22,11 @@
 # ══════════════════════════════════════════════════════════════
 
 import sqlite3, json, os, uuid, hashlib, hmac, secrets, shutil, csv, io
+
+def light_columns(con, alias=""):
+    from pharmacy_ops import light_columns as columns
+    return columns(con, alias)
+
 from datetime import datetime, date, timedelta
 
 DB_PATH     = os.path.join(os.path.dirname(__file__), "pharmacy.db")
@@ -48,16 +53,9 @@ def _err(msg: str): return json.dumps({"ok": False, "error": msg}, ensure_ascii=
 def _new_id(prefix: str): return f"{prefix}-{uuid.uuid4().hex[:6].upper()}"
 
 def auto_backup():
-    """إنشاء لقطة SQLite سليمة؛ قابلة للاستدعاء من خيط الخلفية والاختبارات."""
-    os.makedirs(BACKUP_DIR, exist_ok=True)
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    dest = os.path.join(BACKUP_DIR, f"auto_pharmacy_{ts}.db")
-    src, dst = sqlite3.connect(DB_PATH), sqlite3.connect(dest)
-    try:
-        src.backup(dst)
-    finally:
-        src.close(); dst.close()
-    return dest
+    """نسخة محلية متسقة ثم نسخة إضافية إن حدد المدير مكانها."""
+    from backup_store import run_backup
+    return run_backup()["path"]
 
 
 # ── FIX [1.6]: atomic invoice numbering ───────────────────────
@@ -366,6 +364,8 @@ def init_db():
     """)
 
     # ── migrations ──
+    from camera_api import init_schema
+    init_schema(con)
     def _add_col(table, col, typedef):
         cols = {r[1] for r in con.execute(f"PRAGMA table_info({table})").fetchall()}
         if col not in cols:
@@ -403,6 +403,8 @@ def init_db():
     con.execute("UPDATE medicines SET purchase_unit=COALESCE(NULLIF(purchase_unit,''),unit,'علبة')")
     con.execute("UPDATE medicines SET sale_unit=COALESCE(NULLIF(sale_unit,''),unit,'قرص')")
     con.execute("UPDATE medicines SET conversion_factor=1 WHERE conversion_factor IS NULL OR conversion_factor<1")
+    from pharmacy_ops import init_schema as init_operations_schema
+    init_operations_schema(con)
     # back-fill invoice_seq / invoice_year
     needs_fill = con.execute(
         "SELECT COUNT(*) FROM sales WHERE invoice_seq=0 AND invoice_num IS NOT NULL"
@@ -558,29 +560,27 @@ class PharmacyAPI:
         con  = _conn()
         # FIX [1.5]: only return active medicines
         rows = _rows(con.execute(
-            "SELECT * FROM medicines WHERE is_active=1 ORDER BY name"))
+            f"SELECT {light_columns(con)} FROM medicines WHERE is_active=1 ORDER BY name"))
         con.close(); return _ok(rows)
 
-    def get_medicine(self, mid: str):
+    def get_medicine(self, mid: str, include_image: bool = True):
         con = _conn()
-        row = con.execute("SELECT * FROM medicines WHERE id=?", (mid,)).fetchone()
+        columns = light_columns(con) + (",image_data" if include_image else "")
+        row = con.execute(f"SELECT {columns} FROM medicines WHERE id=?", (mid,)).fetchone()
         con.close(); return _ok(dict(row) if row else None)
 
     def get_medicine_by_barcode(self, barcode: str):
         """أولوية المطابقة: باركود الصيدلية ثم الشركة ثم الباركود القديم."""
+        from camera_api import resolve
         con = _conn()
-        row = con.execute(
-            "SELECT * FROM medicines WHERE is_active=1 AND "
-            "(pharmacy_barcode=? OR company_barcode=? OR barcode=?) "
-            "ORDER BY CASE WHEN pharmacy_barcode=? THEN 1 "
-            "WHEN company_barcode=? THEN 2 ELSE 3 END LIMIT 1",
-            (barcode, barcode, barcode, barcode, barcode)
-        ).fetchone()
-        con.close(); return _ok(dict(row) if row else None)
+        try: return _ok(resolve(con, barcode))
+        finally: con.close()
 
     def add_medicine(self, data: str, user_id: str = None):
         try:
             d   = json.loads(data)
+            from camera_api import validate_image
+            validate_image(d.get("image_data"))
             con = _conn()
             # FIX [1.7]: barcode uniqueness check
             barcode = d.get("barcode", "").strip()
@@ -611,6 +611,10 @@ class PharmacyAPI:
                     con.close()
                     return _err(f"باركود الصيدلية '{pharmacy_barcode}' مستخدم بالفعل للدواء: {dup['name']}")
             nid = _new_id("M")
+            from camera_api import resolve
+            for code in (barcode, company_barcode, pharmacy_barcode):
+                if code and (resolve(con, code) or con.execute("SELECT 1 FROM medicine_barcodes WHERE barcode=?", (code,)).fetchone()):
+                    con.close(); return _err("الباركود مرتبط بصنف أو وحدة أخرى بالفعل")
             con.execute(
                 "INSERT INTO medicines(id,name,scientific_name,manufacturer,batch_number,category,price,cost,stock,min_stock,"
                 "unit,supplier_id,expiry,barcode,company_barcode,pharmacy_barcode,location,description,image_data,"
@@ -663,9 +667,29 @@ class PharmacyAPI:
             old = con.execute("SELECT * FROM medicines WHERE id=?", (mid,)).fetchone()
             if not old:
                 con.close(); return _err("الدواء غير موجود")
+            from camera_api import resolve
+            for code in (barcode, company_barcode, pharmacy_barcode):
+                match = resolve(con, code) if code else None
+                alias = con.execute("SELECT 1 FROM medicine_barcodes WHERE barcode=?",(code,)).fetchone() if code else None
+                if (alias and not con.execute("SELECT 1 FROM medicine_barcodes WHERE barcode=? AND medicine_id=?",(code,mid)).fetchone()) or (match and match["id"] != mid):
+                    con.close(); return _err("الباركود مرتبط بصنف أو وحدة أخرى بالفعل")
+            if d.get("image_data") and d["image_data"] != old["image_data"]:
+                from camera_api import validate_image
+                try: validate_image(d["image_data"])
+                except ValueError as exc:
+                    con.close(); return _err(str(exc))
             def val(key, fallback_key=None):
                 if key in d and d.get(key) is not None: return d.get(key)
                 return old[fallback_key or key]
+            from pharmacy_ops import ensure_batches, sync_expiry
+            units_changed = (val("sale_unit") != old["sale_unit"] or int(val("conversion_factor") or 1) != int(old["conversion_factor"] or 1))
+            if val("sale_unit") != old["sale_unit"] and old["stock"] > 0:
+                con.close(); return _err("لا يمكن تغيير وحدة البيع مع وجود مخزون؛ يلزم تحويل أرصدة محكوم")
+            has_batches = con.execute("SELECT 1 FROM medicine_batches WHERE medicine_id=?",(mid,)).fetchone()
+            if has_batches and (float(val("stock")) != old["stock"] or val("expiry") != old["expiry"] or val("batch_number") != old["batch_number"]):
+                con.close(); return _err("الرصيد والصلاحية مرتبطان بدفعات. استخدم الاستلام والجرد بدل تعديل الإجمالي مباشرة")
+            if units_changed:
+                con.execute("INSERT OR IGNORE INTO barcode_unit_reviews VALUES(?)",(mid,))
             old_price = old["price"] if old else None
             con.execute(
                 "UPDATE medicines SET name=?,scientific_name=?,manufacturer=?,batch_number=?,category=?,price=?,cost=?,stock=?,"
@@ -677,7 +701,7 @@ class PharmacyAPI:
                  val("expiry"), (barcode or None) if "barcode" in d else old["barcode"],
                  (company_barcode or None) if "company_barcode" in d else old["company_barcode"],
                  (pharmacy_barcode or None) if "pharmacy_barcode" in d else old["pharmacy_barcode"],
-                 val("location"), val("description"), val("image_data"),
+                 val("location"), val("description"), d.get("image_data") if "image_data" in d else old["image_data"],
                  (1 if d.get("controlled") else 0) if "controlled" in d else old["controlled"],
                  val("purchase_unit") or val("unit") or "علبة", val("sale_unit") or val("unit") or "قرص",
                  max(1, int(val("conversion_factor") or 1)), mid)
@@ -700,6 +724,8 @@ class PharmacyAPI:
             linked = con.execute(
                 "SELECT COUNT(*) FROM sale_items WHERE med_id=?", (mid,)
             ).fetchone()[0]
+            for table in ('medicine_batches','medicine_barcodes','barcode_unit_reviews'):
+                linked += con.execute(f'SELECT COUNT(*) FROM {table} WHERE medicine_id=?',(mid,)).fetchone()[0]
             if linked:
                 # Archive instead of delete
                 con.execute("UPDATE medicines SET is_active=0 WHERE id=?", (mid,))
@@ -715,14 +741,14 @@ class PharmacyAPI:
     def get_low_stock(self):
         con  = _conn()
         rows = _rows(con.execute(
-            "SELECT * FROM medicines WHERE is_active=1 AND stock>0 AND stock<=min_stock ORDER BY stock"))
+            f"SELECT {light_columns(con)} FROM medicines WHERE is_active=1 AND stock>0 AND stock<=min_stock ORDER BY stock"))
         con.close(); return _ok(rows)
 
     def get_expiring(self):
         cutoff = (date.today() + timedelta(days=90)).isoformat()
         con    = _conn()
         rows   = _rows(con.execute(
-            "SELECT * FROM medicines WHERE is_active=1 AND expiry<=? AND stock>0 ORDER BY expiry",
+            f"SELECT {light_columns(con)} FROM medicines WHERE is_active=1 AND expiry<=? AND stock>0 ORDER BY expiry",
             (cutoff,)))
         con.close(); return _ok(rows)
 
@@ -891,10 +917,26 @@ class PharmacyAPI:
             con.execute("PRAGMA foreign_keys=ON")
             con.execute("BEGIN IMMEDIATE")           # FIX [1.6]: atomic lock
 
+            request_id = d.get("draft_id")
+            if request_id:
+                previous = con.execute("SELECT response FROM sale_requests WHERE user_id=? AND request_id=?",(user_id,request_id)).fetchone()
+                if previous:
+                    con.close(); return _ok(json.loads(previous[0]))
+                draft = con.execute("SELECT draft_id,version FROM pos_drafts WHERE user_id=?",(user_id,)).fetchone()
+                if not draft or draft["draft_id"] != request_id or draft["version"] != d.get("draft_version"):
+                    con.rollback(); con.close(); return _err("المسودة تغيرت أو غير محفوظة؛ راجع نقطة البيع")
+
             # ── FIX [1.2]: validate stock for ALL items before any INSERT ──
             items = d.get("items", [])
+            if not items: raise ValueError("السلة فارغة")
             controlled_items = []
+            seen_medicines = set()
             for item in items:
+                quantity = float(item.get("qty",0))
+                if not quantity.is_integer() or quantity < 1 or item.get("medId") in seen_medicines:
+                    raise ValueError("كميات البيع يجب أن تكون أعدادًا صحيحة موجبة بدون أصناف مكررة")
+                item["qty"] = int(quantity)
+                seen_medicines.add(item["medId"])
                 med_row = con.execute(
                     "SELECT name, stock, controlled FROM medicines WHERE id=? AND is_active=1",
                     (item["medId"],)
@@ -973,33 +1015,27 @@ class PharmacyAPI:
                     (nid, item["medId"], item["name"], item["qty"],
                      item["price"], item["total"])
                 )
+                from pharmacy_ops import allocate_batches
+                allocate_batches(con,item["medId"],item["qty"],nid)
                 con.execute(
                     "UPDATE medicines SET stock = stock - ? WHERE id=?",
                     (item["qty"], item["medId"])
                 )
-                # FEFO: الخصم من أقرب دفعة انتهاءً أولاً إن كانت الدفعات مسجلة.
-                remaining = int(item["qty"])
-                batches = con.execute(
-                    "SELECT id,qty FROM medicine_batches WHERE medicine_id=? AND qty>0 "
-                    "ORDER BY CASE WHEN expiry IS NULL OR expiry='' THEN 1 ELSE 0 END, expiry, received_date",
-                    (item["medId"],)
-                ).fetchall()
-                for batch in batches:
-                    if remaining <= 0: break
-                    take = min(remaining, int(batch["qty"]))
-                    con.execute("UPDATE medicine_batches SET qty=qty-? WHERE id=?", (take, batch["id"]))
-                    remaining -= take
             if prescription:
                 rx_id = _new_id("RX")
+                from camera_api import prescription_images
+                pages = prescription_images(prescription)
                 con.execute(
                     "INSERT INTO prescriptions(id,patient_id,doctor_name,doctor_license,prescription_type,"
                     "sale_id,date,image_data,created_by,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
                     (rx_id, d.get("patient_id"), str(prescription.get("doctor_name", "")).strip(),
                      str(prescription.get("doctor_license", "")).strip(),
                      str(prescription.get("prescription_type", "عادية")).strip(), nid,
-                     prescription.get("date") or s_date, prescription.get("image_data"),
+                     prescription.get("date") or s_date, None,
                      user_id or "system", now.isoformat())
                 )
+                for position, page in enumerate(pages):
+                    con.execute("INSERT INTO prescription_pages VALUES(?,?,?,?)",(_new_id("RXP"),rx_id,position,page))
                 _audit(con, user_id, "ADD_PRESCRIPTION", "prescription", rx_id, f"فاتورة {inv}")
             if d.get("payment_method") == "آجل":
                 if not d.get("patient_id"):
@@ -1022,10 +1058,14 @@ class PharmacyAPI:
                             "ON CONFLICT(patient_id) DO UPDATE SET points=points+excluded.points,last_updated=excluded.last_updated",
                             (d.get("patient_id"),earned,now.isoformat()))
             _audit(con, user_id, "ADD_SALE", "sale", nid, inv)
-            con.commit(); con.close()
-            return _ok({"id": nid, "invoiceNum": inv, "date": s_date, "time": s_time,
+            response = {"id": nid, "invoiceNum": inv, "date": s_date, "time": s_time,
                         "total":total_due,"patientAmount":patient_amount,"insuranceAmount":insurance_amount,
-                        "loyaltyDiscount":loyalty_discount})
+                        "loyaltyDiscount":loyalty_discount}
+            if request_id:
+                con.execute("INSERT INTO sale_requests VALUES(?,?,?)",(user_id,request_id,json.dumps(response)))
+                con.execute("DELETE FROM pos_drafts WHERE user_id=? AND draft_id=?",(user_id,request_id))
+            con.commit(); con.close()
+            return _ok(response)
         except Exception as e:
             try: con.rollback(); con.close()
             except Exception: pass
@@ -1036,7 +1076,7 @@ class PharmacyAPI:
         month = (month or date.today().strftime("%Y-%m"))[:7]
         con = _conn()
         rows = _rows(con.execute(
-            "SELECT p.*,s.invoice_num,s.patient_name,s.total,s.payment_method,s.cashier "
+            "SELECT p.id,p.patient_id,p.doctor_name,p.doctor_license,p.prescription_type,p.sale_id,p.date,p.created_by,p.created_at,s.invoice_num,s.patient_name,s.total,s.payment_method,s.cashier "
             "FROM prescriptions p JOIN sales s ON s.id=p.sale_id "
             "WHERE substr(p.date,1,7)=? ORDER BY p.date DESC,s.sale_time DESC", (month,)
         ))
@@ -1046,7 +1086,7 @@ class PharmacyAPI:
     def get_top_selling_meds(self, limit: int = 50):
         con = _conn()
         rows = _rows(con.execute(
-            "SELECT m.*,COALESCE(SUM(CASE WHEN s.status='مكتمل' THEN si.qty ELSE 0 END),0) sold_qty "
+            f"SELECT {light_columns(con, 'm')},COALESCE(SUM(CASE WHEN s.status='مكتمل' THEN si.qty ELSE 0 END),0) sold_qty "
             "FROM medicines m LEFT JOIN sale_items si ON si.med_id=m.id LEFT JOIN sales s ON s.id=si.sale_id "
             "WHERE m.is_active=1 GROUP BY m.id ORDER BY sold_qty DESC,m.name LIMIT ?", (max(1,min(int(limit),500)),)
         ))
@@ -1056,7 +1096,7 @@ class PharmacyAPI:
         q = f"%{(query or '').strip()}%"
         con = _conn()
         rows = _rows(con.execute(
-            "SELECT * FROM medicines WHERE is_active=1 AND (name LIKE ? OR scientific_name LIKE ? OR "
+            f"SELECT {light_columns(con)} FROM medicines WHERE is_active=1 AND (name LIKE ? OR scientific_name LIKE ? OR "
             "pharmacy_barcode LIKE ? OR company_barcode LIKE ? OR barcode LIKE ?) ORDER BY name LIMIT 100",
             (q,q,q,q,q)
         ))
@@ -1133,11 +1173,16 @@ class PharmacyAPI:
         # FIX [1.4]: void invoice and restore stock
         try:
             con = _conn()
+            con.execute("BEGIN IMMEDIATE")
             row = con.execute("SELECT * FROM sales WHERE id=?", (sale_id,)).fetchone()
             if not row:
                 con.close(); return _err("الفاتورة غير موجودة")
             if row["status"] == "ملغاة":
                 con.close(); return _err("هذه الفاتورة ملغاة بالفعل")
+            # Restore the exact batches consumed by new invoices.
+            allocations = con.execute("SELECT * FROM sale_batch_allocations WHERE sale_id=?",(sale_id,)).fetchall()
+            for allocation in allocations:
+                con.execute("UPDATE medicine_batches SET qty=qty+? WHERE id=?",(allocation["quantity"],allocation["batch_id"]))
             # restore stock
             items = _rows(con.execute(
                 "SELECT med_id, qty FROM sale_items WHERE sale_id=?", (sale_id,)))
@@ -1146,6 +1191,10 @@ class PharmacyAPI:
                     "UPDATE medicines SET stock = stock + ? WHERE id=?",
                     (item["qty"], item["med_id"])
                 )
+            from pharmacy_ops import ensure_batches, sync_expiry
+            for item in items:
+                ensure_batches(con,item["med_id"])
+                sync_expiry(con,item["med_id"])
             now = datetime.now().isoformat()
             con.execute(
                 "UPDATE sales SET status='ملغاة', voided_by=?, voided_at=? WHERE id=?",
@@ -1416,30 +1465,23 @@ class PharmacyAPI:
         con.commit(); con.close(); return _ok()
 
     # ── BACKUP / RESTORE [3.14] ───────────────────────────────
-    def backup_database(self):
-        try:
-            os.makedirs(BACKUP_DIR, exist_ok=True)
-            ts   = datetime.now().strftime("%Y%m%d_%H%M%S")
-            dest = os.path.join(BACKUP_DIR, f"pharmacy_{ts}.db")
-            # Use SQLite backup API for consistent snapshot
-            src = sqlite3.connect(DB_PATH)
-            dst = sqlite3.connect(dest)
-            src.backup(dst)
-            src.close(); dst.close()
-            return _ok({"path": dest, "filename": os.path.basename(dest)})
-        except Exception as e: return _err(str(e))
+    def backup_database(self, user_id="system"):
+        from backup_store import run_backup
+        try: return _ok(run_backup(user_id))
+        except Exception as exc: return _err(str(exc))
 
     def get_backup_status(self):
+        from backup_store import status as secondary_status
         try:
             os.makedirs(BACKUP_DIR, exist_ok=True)
             paths = [os.path.join(BACKUP_DIR, f) for f in os.listdir(BACKUP_DIR) if f.endswith(".db")]
             if not paths:
-                return _ok({"last_backup": None, "age_days": None, "stale": True})
+                return _ok({"last_backup": None, "age_days": None, "stale": True, "secondary": secondary_status()})
             latest = max(paths, key=os.path.getmtime)
             modified = datetime.fromtimestamp(os.path.getmtime(latest))
             age_days = (datetime.now() - modified).total_seconds() / 86400
             return _ok({"last_backup": modified.isoformat(), "age_days": round(age_days, 2),
-                        "stale": age_days >= 3, "filename": os.path.basename(latest)})
+                        "stale": age_days >= 3, "filename": os.path.basename(latest), "secondary": secondary_status()})
         except Exception as e: return _err(str(e))
 
     def restore_database(self, backup_path: str):
@@ -1700,9 +1742,11 @@ class PharmacyAPI:
 
     def add_purchase(self, data: str, user_id: str = None):
         """إنشاء أمر شراء جديد (status=مفتوح)"""
+        con = None
         try:
             d = json.loads(data)
             con = _conn()
+            con.execute("BEGIN IMMEDIATE")
             nid = _new_id("PO")
             year = datetime.now().year
             seq = con.execute(
@@ -1715,7 +1759,17 @@ class PharmacyAPI:
                                    (d.get("supplier_id"),)).fetchone()
             sup_name = supplier["name"] if supplier else d.get("supplier_name","")
 
-            total_cost = sum(i.get("unit_cost",0)*i.get("qty_ordered",0) for i in d.get("items",[]))
+            if not d.get("items"): raise ValueError("أمر الشراء فارغ")
+            for item in d["items"]:
+                med = con.execute("SELECT * FROM medicines WHERE id=? AND is_active=1",(item.get("med_id"),)).fetchone()
+                if not med: raise ValueError("صنف الشراء غير موجود")
+                qty = float(item.get("qty_ordered",0))
+                cost = float(item["unit_cost"]) if item.get("unit_cost") is not None else float(med["cost"] or 0)*(med["conversion_factor"] or 1)
+                if not qty.is_integer() or qty <= 0 or not 0 <= cost < float("inf"):
+                    raise ValueError("كمية الشراء أو التكلفة غير صحيحة")
+                item.update(qty_ordered=int(qty),unit_cost=cost,med_name=med["name"],
+                            purchase_unit=med["purchase_unit"] or med["unit"],sale_unit=med["sale_unit"] or med["unit"],conversion_factor=med["conversion_factor"] or 1)
+            total_cost = sum(i["unit_cost"]*i["qty_ordered"] for i in d["items"])
 
             con.execute(
                 "INSERT INTO purchases(id,po_num,supplier_id,supplier_name,status,total_cost,notes,created_by,created_at)"
@@ -1725,12 +1779,12 @@ class PharmacyAPI:
             )
             for item in d.get("items",[]):
                 con.execute(
-                    "INSERT INTO purchase_items(purchase_id,med_id,med_name,qty_ordered,qty_received,unit_cost,total_cost)"
-                    " VALUES(?,?,?,?,?,?,?)",
+                    "INSERT INTO purchase_items(purchase_id,med_id,med_name,qty_ordered,qty_received,unit_cost,total_cost,purchase_unit,sale_unit,conversion_factor)"
+                    " VALUES(?,?,?,?,?,?,?,?,?,?)",
                     (nid, item.get("med_id"), item.get("med_name"),
                      item.get("qty_ordered",0), 0,
                      item.get("unit_cost",0),
-                     item.get("unit_cost",0)*item.get("qty_ordered",0))
+                     item.get("unit_cost",0)*item.get("qty_ordered",0),item["purchase_unit"],item["sale_unit"],item["conversion_factor"])
                 )
             # تحديث total_orders للمورد
             con.execute(
@@ -1739,27 +1793,47 @@ class PharmacyAPI:
             )
             _audit(con, user_id, "ADD", "purchase", nid, po_num)
             con.commit(); con.close(); return _ok({"id": nid, "po_num": po_num})
-        except Exception as e: return _err(str(e))
+        except Exception as e:
+            if con: con.rollback(); con.close()
+            return _err(str(e))
 
     def receive_purchase(self, pid: str, data: str, user_id: str = None):
         """استلام بضاعة — يُحدّث المخزون وحالة أمر الشراء"""
+        con = None
         try:
             d = json.loads(data)
             con = _conn()
+            con.execute("BEGIN IMMEDIATE")
             po = con.execute("SELECT * FROM purchases WHERE id=?", (pid,)).fetchone()
             if not po: con.close(); return _err("أمر الشراء غير موجود")
             if po["status"] == "مستلم": con.close(); return _err("تم استلام هذا الأمر بالكامل مسبقاً")
+            if po["status"] == "ملغي": con.close(); return _err("لا يمكن استلام أمر ملغي")
 
             items_received = d.get("items", [])
             now = datetime.now().isoformat()
+            seen = set()
+            received_any = False
 
             for item in items_received:
                 item_row = con.execute(
-                    "SELECT * FROM purchase_items WHERE id=?", (item["item_id"],)
+                    "SELECT * FROM purchase_items WHERE id=? AND purchase_id=?", (item["item_id"], pid)
                 ).fetchone()
-                if not item_row: continue
-                qty = int(item.get("qty_received", 0))
-                if qty <= 0: continue
+                if not item_row or item["item_id"] in seen: raise ValueError("صنف الاستلام لا يتبع الأمر أو مكرر")
+                seen.add(item["item_id"])
+                raw_qty = float(item.get("qty_received", 0))
+                if not raw_qty.is_integer() or raw_qty < 0: raise ValueError("كمية الاستلام يجب أن تكون عددًا صحيحًا غير سالب")
+                qty = int(raw_qty)
+                if qty > item_row["qty_ordered"] - item_row["qty_received"]: raise ValueError("كمية الاستلام أكبر من المتبقي في الأمر")
+                if qty == 0: continue
+                received_any = True
+                batch_number = str(item.get("batch_number") or "").strip()
+                expiry = str(item.get("expiry") or "").strip()
+                if not batch_number or len(batch_number)>100: raise ValueError("رقم الدفعة مطلوب لكل صنف مستلم")
+                if len(expiry)!=10 or date.fromisoformat(expiry)<date.today(): raise ValueError("تاريخ صلاحية الاستلام غير صالح أو منتهٍ")
+                cost_value = item.get("unit_cost")
+                unit_cost = float(item_row["unit_cost"] or 0) if cost_value is None else float(cost_value)
+                if not 0 <= unit_cost < float("inf"):
+                    raise ValueError("تكلفة الوحدة يجب أن تكون رقمًا غير سالب")
 
                 con.execute(
                     "UPDATE purchase_items SET qty_received=qty_received+? WHERE id=?",
@@ -1768,9 +1842,12 @@ class PharmacyAPI:
                 # تحديث المخزون
                 if item_row["med_id"]:
                     med_units = con.execute(
-                        "SELECT conversion_factor,batch_number,expiry FROM medicines WHERE id=?", (item_row["med_id"],)
+                        "SELECT conversion_factor,COALESCE(sale_unit,unit) sale_unit,batch_number,expiry FROM medicines WHERE id=?", (item_row["med_id"],)
                     ).fetchone()
-                    factor = max(1, int((med_units["conversion_factor"] if med_units else 1) or 1))
+                    if not med_units or med_units["sale_unit"] != item_row["sale_unit"]: raise ValueError("تغيرت وحدة البيع منذ إنشاء الأمر؛ أعد مراجعة أمر الشراء")
+                    factor = max(1, int(item_row["conversion_factor"] or 1))
+                    from pharmacy_ops import ensure_batches, sync_expiry
+                    ensure_batches(con,item_row["med_id"])
                     stock_qty = qty * factor
                     con.execute(
                         "UPDATE medicines SET stock=stock+? WHERE id=?",
@@ -1778,19 +1855,20 @@ class PharmacyAPI:
                     )
                     con.execute(
                         "INSERT INTO medicine_batches(id,medicine_id,batch_number,expiry,qty,cost,received_date) VALUES(?,?,?,?,?,?,?)",
-                        (_new_id("BAT"),item_row["med_id"],item.get("batch_number") or med_units["batch_number"],
-                         item.get("expiry") or med_units["expiry"],stock_qty,
-                         float(item.get("unit_cost") or item_row["unit_cost"] or 0)/factor,date.today().isoformat())
+                        (_new_id("BAT"),item_row["med_id"],batch_number,
+                         expiry,stock_qty,
+                         unit_cost/factor,date.today().isoformat())
                     )
+                    sync_expiry(con,item_row["med_id"])
                     # سعر أمر الشراء لوحدة الشراء؛ نخزن تكلفة وحدة البيع.
-                    new_cost = item.get("unit_cost")
-                    if new_cost:
+                    if cost_value is not None:
                         con.execute(
                             "UPDATE medicines SET cost=? WHERE id=?",
-                            (float(new_cost) / factor, item_row["med_id"])
+                            (unit_cost / factor, item_row["med_id"])
                         )
 
             # تحقق إذا كل الأصناف استُلمت
+            if not received_any: raise ValueError("أدخل كمية مستلمة لصنف واحد على الأقل")
             total_ordered  = con.execute(
                 "SELECT COALESCE(SUM(qty_ordered),0) FROM purchase_items WHERE purchase_id=?", (pid,)
             ).fetchone()[0]
@@ -1807,7 +1885,9 @@ class PharmacyAPI:
                    f"{po['po_num']} — {new_status} — تم تحويل وحدات الشراء إلى وحدات البيع")
             con.commit(); con.close()
             return _ok({"status": new_status})
-        except Exception as e: return _err(str(e))
+        except Exception as e:
+            if con: con.rollback(); con.close()
+            return _err(str(e))
 
     def cancel_purchase(self, pid: str, user_id: str = None):
         try:

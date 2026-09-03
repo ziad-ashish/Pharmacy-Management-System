@@ -105,9 +105,6 @@ const SettingsPage = (() => {
   let _filteredUsers = [];
   let _searchQuery = '';
   let _selectedRoleFilter = 'all';
-  let _cameraStream = null;
-  let _cameraFacing = 'environment';
-  let _cameraShot = '';
 
   async function afterRender() {
     _activeTab = 'general';
@@ -179,7 +176,7 @@ const SettingsPage = (() => {
   function _renderTab(tab) {
     const content = document.getElementById('setContent');
     if (!content) return;
-    if (tab !== 'devices') _stopCamera();
+    CameraStudio.close();
     _renderPreview(tab);
 
     if (tab === 'general') {
@@ -372,16 +369,27 @@ const SettingsPage = (() => {
   async function _renderBackupTab(content) {
     content.innerHTML = `<div class="card"><div class="card-body"><div class="empty-state"><div class="es-icon an-spin"><i class="fas fa-circle-notch"></i></div><h3 class="es-title">جارٍ قراءة النسخ الاحتياطية...</h3></div></div></div>`;
     try {
-      const backups = await DB.listBackups();
+      const [backups,secondary] = await Promise.all([DB.listBackups(),_api("secondary_backup")]);
       content.innerHTML = `
         <div class="settings-section-head"><div><h2>النسخ الاحتياطي والاستعادة</h2><p>احمِ بيانات المبيعات والمخزون والمستخدمين من الفقد.</p></div><button class="btn btn-primary" id="createBackupBtn"><i class="fas fa-plus"></i> إنشاء نسخة الآن</button></div>
         <div class="settings-callout safe"><i class="fas fa-shield-halved"></i><div><strong>النسخ تحفظ محليًا</strong><span>يتم إنشاء لقطة سليمة من SQLite دون إيقاف العمل على النظام.</span></div></div>
+        <div class="card"><div class="card-head"><span class="card-title">نسخة إضافية خارج المشروع</span></div><div class="card-body">
+          <p>اختر مجلدًا على قرص خارجي أو جهاز آخر. مجلد آخر على نفس القرص لا يحمي من تلف القرص.</p>
+          <label for="secondaryBackupDir">المسار الكامل للمجلد</label><input id="secondaryBackupDir" class="form-control" dir="ltr" value="${_esc(secondary.directory||'')}" placeholder="E:\\PharmacyBackups">
+          <p role="status">الحالة: ${({ok:'آخر نسخة إضافية سليمة',failed:'فشل آخر نسخ إضافي',stale:'لم تُنشأ نسخة إضافية حديثة',not_configured:'لم يُحدد مكان'})[secondary.state]} ${secondary.last_success?'· '+_esc(new Date(secondary.last_success).toLocaleString('ar-EG')):''}</p>
+          <p>${_esc(secondary.error||'')}</p><button class="btn btn-primary" id="saveSecondaryBackup">حفظ المكان</button>
+          <small>اترك المسار فارغًا لإيقاف النسخة الإضافية. الحفظ لا ينقل بيانات؛ استخدم إنشاء نسخة الآن للاختبار.</small>
+        </div></div>
         <div class="card"><div class="card-head"><span class="card-title"><i class="fas fa-clock-rotate-left"></i> النسخ المتاحة</span><span class="badge bdg-slate">${backups.length}</span></div><div class="card-body p0">
           ${backups.length ? `<div class="backup-list">${backups.map((b,i)=>`<div class="backup-row"><span class="backup-icon"><i class="fas fa-database"></i></span><div class="backup-meta"><strong>${_esc(b.filename)}</strong><small>${new Date(b.modified).toLocaleString('ar-EG')} · ${b.size_kb} KB</small></div>${i===0?'<span class="badge bdg-ok">الأحدث</span>':''}<button class="btn btn-ghost btn-sm restore-backup" data-path="${_esc(b.path)}"><i class="fas fa-clock-rotate-left"></i> استعادة</button></div>`).join('')}</div>` : '<div class="empty-state"><div class="es-icon"><i class="fas fa-database"></i></div><h3 class="es-title">لا توجد نسخ بعد</h3><p class="es-sub">أنشئ أول نسخة احتياطية قبل إدخال بيانات التشغيل الفعلية.</p></div>'}
         </div></div>`;
+      document.getElementById('saveSecondaryBackup').onclick=async event=>{
+        const button=event.currentTarget;button.disabled=true;
+        try{await _api('secondary_backup',{body:{directory:document.getElementById('secondaryBackupDir').value.trim()}});Toast.ok('تم حفظ المكان','أنشئ نسخة الآن للتأكد من الوصول وسلامة النسخة');await _renderBackupTab(content);}catch(error){Toast.err('تعذر حفظ المكان',error.message);button.disabled=false;}
+      };
       document.getElementById('createBackupBtn')?.addEventListener('click', async e => {
         const btn=e.currentTarget; btn.disabled=true; btn.innerHTML='<i class="fas fa-circle-notch fa-spin"></i> جارٍ الإنشاء';
-        try { const result=await DB.backupDatabase(); Toast.ok('تم إنشاء النسخة', result.filename || 'تم حفظ قاعدة البيانات'); _renderBackupTab(content); }
+        try { const result=await DB.backupDatabase(); if(result.secondary_error)Toast.warn('المحلية محفوظة؛ الإضافية فشلت',result.secondary_error);else Toast.ok('تم إنشاء النسخة', result.secondary_path?'تم التحقق من النسختين المحلية والإضافية':result.filename || 'تم حفظ قاعدة البيانات'); _renderBackupTab(content); }
         catch(err){Toast.err('فشل النسخ',err.message);btn.disabled=false;btn.innerHTML='<i class="fas fa-plus"></i> إنشاء نسخة الآن';}
       });
       content.querySelectorAll('.restore-backup').forEach(btn=>btn.addEventListener('click',()=>{
@@ -453,42 +461,11 @@ const SettingsPage = (() => {
         </div>
       </div>
 
-      <div class="card camera-settings-card">
-        <div class="card-head camera-card-head">
-          <div><h3 class="card-title"><i class="fas fa-camera"></i> كاميرا الجهاز</h3><p>التقاط صور المنتجات أو المستندات مباشرةً دون مغادرة النظام</p></div>
-          <span class="camera-status idle" id="cameraStatus"><i class="fas fa-circle"></i> متوقفة</span>
-        </div>
-        <div class="card-body">
-          <div class="camera-workspace">
-            <div class="camera-stage" id="cameraStage">
-              <video id="deviceCameraVideo" autoplay playsinline muted></video>
-              <canvas id="deviceCameraCanvas" hidden></canvas>
-              <img id="deviceCameraShot" alt="الصورة الملتقطة" ${_cameraShot ? `src="${_cameraShot}"` : ''} />
-              <div class="camera-placeholder" id="cameraPlaceholder">
-                <span><i class="fas fa-camera"></i></span>
-                <strong>الكاميرا متوقفة</strong>
-                <p>اضغط تشغيل الكاميرا، ثم اسمح للنظام بالوصول إليها.</p>
-              </div>
-              <div class="camera-grid-lines" aria-hidden="true"></div>
-            </div>
-            <div class="camera-side-panel">
-              <div class="camera-privacy"><i class="fas fa-shield-halved"></i><div><strong>خصوصيتك محفوظة</strong><span>لا تعمل الكاميرا إلا بعد الضغط على تشغيل، وتتوقف عند مغادرة الصفحة.</span></div></div>
-              <label class="form-label">اتجاه الكاميرا</label>
-              <div class="camera-facing">
-                <button class="tab-btn ${_cameraFacing==='environment'?'active':''}" id="cameraRearBtn" type="button"><i class="fas fa-camera-rotate"></i> خلفية</button>
-                <button class="tab-btn ${_cameraFacing==='user'?'active':''}" id="cameraFrontBtn" type="button"><i class="fas fa-user"></i> أمامية</button>
-              </div>
-              <div class="camera-shot-info" id="cameraShotInfo">لم يتم التقاط صورة بعد</div>
-            </div>
-          </div>
-        </div>
-        <div class="card-foot camera-actions">
-          <button class="btn btn-primary btn-sm" id="cameraStartBtn"><i class="fas fa-video"></i> تشغيل الكاميرا</button>
-          <button class="btn btn-ghost btn-sm hidden" id="cameraCaptureBtn"><i class="fas fa-camera"></i> التقاط صورة</button>
-          <button class="btn btn-ghost btn-sm hidden" id="cameraRetakeBtn"><i class="fas fa-rotate-left"></i> إعادة التصوير</button>
-          <button class="btn btn-ghost btn-sm hidden" id="cameraDownloadBtn"><i class="fas fa-download"></i> حفظ الصورة</button>
-          <button class="btn btn-ghost btn-sm hidden" id="cameraStopBtn"><i class="fas fa-power-off"></i> إيقاف</button>
-        </div>
+      <div class="camera-launch-card">
+        <span aria-hidden="true"><i class="fas fa-camera"></i></span>
+        <div><h3>الكاميرا والمسح</h3><p>اختبر الجهاز والدقة هنا. التصوير وربط الصور داخل الدواء والروشتة، والمسح داخل البيع والجرد والاستلام.</p>
+        <button class="btn btn-primary" id="cameraTestBtn">اختبار الكاميرا</button>
+        <button class="btn btn-ghost" id="cameraScanTestBtn">اختبار قراءة الباركود</button></div>
       </div>`;
 
     const setPaper = w => { DeviceSettings.set({ paperWidth: w }); _renderDevicesTab(content); };
@@ -503,16 +480,8 @@ const SettingsPage = (() => {
       Toast.ok('تم حفظ الإعدادات');
     });
 
-    document.getElementById('cameraStartBtn')?.addEventListener('click', _startCamera);
-    document.getElementById('cameraStopBtn')?.addEventListener('click', () => _stopCamera(true));
-    document.getElementById('cameraCaptureBtn')?.addEventListener('click', _captureCamera);
-    document.getElementById('cameraRetakeBtn')?.addEventListener('click', async () => { _cameraShot=''; await _startCamera(); });
-    document.getElementById('cameraRearBtn')?.addEventListener('click', async () => { _cameraFacing='environment'; await _startCamera(); });
-    document.getElementById('cameraFrontBtn')?.addEventListener('click', async () => { _cameraFacing='user'; await _startCamera(); });
-    document.getElementById('cameraDownloadBtn')?.addEventListener('click', () => {
-      if (!_cameraShot) return;
-      const a=document.createElement('a'); a.href=_cameraShot; a.download=`shefaa-camera-${new Date().toISOString().replace(/[:.]/g,'-')}.jpg`; a.click();
-    });
+    document.getElementById('cameraTestBtn')?.addEventListener('click', () => CameraStudio.open({title:'اختبار كاميرا الجهاز'}));
+    document.getElementById('cameraScanTestBtn')?.addEventListener('click', () => CameraWorkflows.scan({title:'اختبار الباركود', onAccept:async()=>{}, acceptLabel:'تم الاختبار'}));
 
     document.getElementById('devTestPrint')?.addEventListener('click', () => {
       const tmp = document.createElement('div');
@@ -561,73 +530,6 @@ const SettingsPage = (() => {
     });
   }
 
-  async function _startCamera() {
-    const video=document.getElementById('deviceCameraVideo'), placeholder=document.getElementById('cameraPlaceholder');
-    const status=document.getElementById('cameraStatus'), start=document.getElementById('cameraStartBtn');
-    if (!video) return;
-    if (!navigator.mediaDevices?.getUserMedia) {
-      if (placeholder) placeholder.innerHTML='<span class="error"><i class="fas fa-camera-slash"></i></span><strong>الكاميرا غير مدعومة</strong><p>شغّل التطبيق من نسخته المكتبية أو متصفح حديث يدعم الوصول للكاميرا.</p>';
-      if (status) { status.className='camera-status error'; status.innerHTML='<i class="fas fa-circle"></i> غير مدعومة'; }
-      return;
-    }
-    _stopCamera(false);
-    _cameraShot='';
-    if (start) { start.disabled=true; start.innerHTML='<i class="fas fa-circle-notch fa-spin"></i> جارٍ التشغيل'; }
-    if (status) { status.className='camera-status waiting'; status.innerHTML='<i class="fas fa-circle"></i> طلب الإذن'; }
-    try {
-      _cameraStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:_cameraFacing},width:{ideal:1280},height:{ideal:720}},audio:false});
-      video.srcObject=_cameraStream;
-      await video.play();
-      video.classList.add('active');
-      document.getElementById('deviceCameraShot')?.classList.remove('active');
-      placeholder?.classList.add('hidden');
-      start?.classList.add('hidden');
-      const capture=document.getElementById('cameraCaptureBtn'), stop=document.getElementById('cameraStopBtn');
-      capture?.classList.remove('hidden'); stop?.classList.remove('hidden');
-      document.getElementById('cameraRetakeBtn')?.classList.add('hidden');
-      document.getElementById('cameraDownloadBtn')?.classList.add('hidden');
-      if (status) { status.className='camera-status live'; status.innerHTML='<i class="fas fa-circle"></i> تعمل الآن'; }
-      const info=document.getElementById('cameraShotInfo'); if(info) info.textContent=`${video.videoWidth||1280} × ${video.videoHeight||720} — جاهزة للتصوير`;
-    } catch (err) {
-      const denied=err?.name==='NotAllowedError'||err?.name==='PermissionDeniedError';
-      if (placeholder) { placeholder.classList.remove('hidden'); placeholder.innerHTML=`<span class="error"><i class="fas fa-camera-slash"></i></span><strong>${denied?'لم يتم السماح بالكاميرا':'تعذر تشغيل الكاميرا'}</strong><p>${denied?'اسمح بالوصول من نافذة الإذن ثم حاول مرة أخرى.':'تأكد من توصيل الكاميرا وعدم استخدامها في برنامج آخر.'}</p>`; }
-      if (status) { status.className='camera-status error'; status.innerHTML='<i class="fas fa-circle"></i> غير متاحة'; }
-      if (start) { start.disabled=false; start.classList.remove('hidden'); start.innerHTML='<i class="fas fa-rotate"></i> إعادة المحاولة'; }
-    }
-  }
-
-  function _stopCamera(updateUi=false) {
-    _cameraStream?.getTracks?.().forEach(track=>track.stop());
-    _cameraStream=null;
-    const video=document.getElementById('deviceCameraVideo');
-    if (video) { video.srcObject=null; video.classList.remove('active'); }
-    if (!updateUi) return;
-    document.getElementById('cameraPlaceholder')?.classList.remove('hidden');
-    const start=document.getElementById('cameraStartBtn'); if(start){start.disabled=false;start.classList.remove('hidden');start.innerHTML='<i class="fas fa-video"></i> تشغيل الكاميرا';}
-    document.getElementById('cameraCaptureBtn')?.classList.add('hidden');
-    document.getElementById('cameraStopBtn')?.classList.add('hidden');
-    const status=document.getElementById('cameraStatus'); if(status){status.className='camera-status idle';status.innerHTML='<i class="fas fa-circle"></i> متوقفة';}
-  }
-
-  function _captureCamera() {
-    const video=document.getElementById('deviceCameraVideo'), canvas=document.getElementById('deviceCameraCanvas'), shot=document.getElementById('deviceCameraShot');
-    if (!video || !canvas || !shot || video.readyState < 2) { Toast.err('الكاميرا غير جاهزة','انتظر لحظة ثم حاول التصوير مرة أخرى'); return; }
-    const sourceW=video.videoWidth||1280, sourceH=video.videoHeight||720, maxW=1600;
-    const ratio=Math.min(1,maxW/sourceW); canvas.width=Math.round(sourceW*ratio);canvas.height=Math.round(sourceH*ratio);
-    canvas.getContext('2d').drawImage(video,0,0,canvas.width,canvas.height);
-    _cameraShot=canvas.toDataURL('image/jpeg',.88);
-    _stopCamera(false);
-    shot.src=_cameraShot;shot.classList.add('active');
-    document.getElementById('cameraPlaceholder')?.classList.add('hidden');
-    document.getElementById('cameraCaptureBtn')?.classList.add('hidden');
-    document.getElementById('cameraStopBtn')?.classList.add('hidden');
-    document.getElementById('cameraStartBtn')?.classList.add('hidden');
-    document.getElementById('cameraRetakeBtn')?.classList.remove('hidden');
-    document.getElementById('cameraDownloadBtn')?.classList.remove('hidden');
-    const status=document.getElementById('cameraStatus');if(status){status.className='camera-status captured';status.innerHTML='<i class="fas fa-circle-check"></i> تم الالتقاط';}
-    const info=document.getElementById('cameraShotInfo');if(info)info.textContent=`صورة ${canvas.width} × ${canvas.height} — جاهزة للحفظ`;
-    Toast.ok('تم التقاط الصورة','يمكنك حفظها أو إعادة التصوير');
-  }
 
   /* ════════════════════════════════════════════════════════
      USERS TAB — قسم إدارة المستخدمين والصلاحيات المتكامل

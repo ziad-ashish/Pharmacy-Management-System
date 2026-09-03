@@ -191,7 +191,7 @@ const PurchasesPage = (() => {
         <thead><tr><th>الدواء</th><th>الكمية المطلوبة</th><th>الكمية المستلمة</th><th>سعر الوحدة</th><th>الإجمالي</th></tr></thead>
         <tbody>
           ${(p.items || []).map(i => `<tr>
-            <td>${i.med_name}</td>
+            <td>${i.med_name}<small style="display:block">${i.purchase_unit||"وحدة شراء"} = ${i.conversion_factor||1} ${i.sale_unit||"وحدة بيع"}</small></td>
             <td>${i.qty_ordered}</td>
             <td style="color:${i.qty_received >= i.qty_ordered ? 'var(--ok)' : 'var(--warn)'}">${i.qty_received}</td>
             <td>${Fmt.money(i.unit_cost)}</td>
@@ -220,14 +220,15 @@ const PurchasesPage = (() => {
   /* ── استلام البضاعة ─────────────────────────────────── */
   function _receiveModal(p) {
     const body = `
+      <button type="button" class="btn btn-ghost" id="receiveCameraBtn"><i class="fas fa-camera"></i> مراجعة الكميات بالكاميرا</button>
       <p style="font-size:.82rem;color:var(--tx-3);margin-bottom:1rem">
-        أدخل الكمية الفعلية المستلمة لكل صنف. سيتم تحديث المخزون تلقائياً.
+        كل الكميات والتكاليف أدناه لوحدة الشراء المسجلة بالأمر. أدخل دفعة وصلاحية الاستلام من العبوة؛ للدفعات المختلفة استلم كل دفعة على حدة.
       </p>
       <table class="dtable">
-        <thead><tr><th>الدواء</th><th>مطلوب</th><th>مستلم سابقاً</th><th>كمية جديدة</th><th>سعر التكلفة</th></tr></thead>
+        <thead><tr><th>الدواء</th><th>مطلوب</th><th>مستلم سابقاً</th><th>كمية جديدة</th><th>تكلفة وحدة الشراء</th><th>رقم الدفعة *</th><th>الصلاحية *</th></tr></thead>
         <tbody>
           ${(p.items || []).filter(i => i.qty_received < i.qty_ordered).map(i => `<tr>
-            <td>${i.med_name}</td>
+            <td>${i.med_name}<small style="display:block">${i.purchase_unit||'وحدة شراء'} = ${i.conversion_factor||1} ${i.sale_unit||'وحدة بيع'}</small></td>
             <td>${i.qty_ordered}</td>
             <td>${i.qty_received}</td>
             <td><input type="number" min="0" max="${i.qty_ordered - i.qty_received}"
@@ -237,7 +238,7 @@ const PurchasesPage = (() => {
             <td><input type="number" min="0" step="0.01"
                 value="${i.unit_cost}"
                 class="form-control" style="width:100px"
-                id="rcv_cost_${i.id}"></td>
+                id="rcv_cost_${i.id}"></td><td><input class="form-control" style="min-width:120px" id="rcv_batch_${i.id}" maxlength="100" placeholder="من العبوة"></td><td><input class="form-control" style="min-width:140px" type="date" id="rcv_expiry_${i.id}"></td>
           </tr>`).join('')}
         </tbody>
       </table>`;
@@ -250,11 +251,20 @@ const PurchasesPage = (() => {
              <button class="btn btn-ghost" onclick="Modal.close()">إلغاء</button>`,
     });
 
-    document.getElementById('confirmReceiveBtn')?.addEventListener('click', async () => {
+    document.getElementById('receiveCameraBtn')?.addEventListener('click',()=>CameraWorkflows.count({scope:`receive-${p.id}`,purchase:p,onApply:async quantities=>{
+      document.querySelectorAll('[id^="rcv_qty_"]').forEach(input=>input.value=quantities[input.dataset.itemId]||0);
+      Toast.info('تم نقل الكميات','راجع الكميات ثم اضغط تأكيد الاستلام. لم يتم تعديل المخزون بعد.');
+    }}));
+    document.getElementById('confirmReceiveBtn')?.addEventListener('click', async event => {
+      const button = event.currentTarget;
+      if (button.disabled) return;
+      button.disabled = true;
       const items = (p.items || []).filter(i => i.qty_received < i.qty_ordered).map(i => ({
         item_id:      i.id,
-        qty_received: parseInt(document.getElementById(`rcv_qty_${i.id}`)?.value || 0),
-        unit_cost:    parseFloat(document.getElementById(`rcv_cost_${i.id}`)?.value || i.unit_cost),
+        qty_received: Number(document.getElementById(`rcv_qty_${i.id}`)?.value || 0),
+        unit_cost:    Number(document.getElementById(`rcv_cost_${i.id}`)?.value),
+        batch_number:document.getElementById(`rcv_batch_${i.id}`)?.value.trim(),
+        expiry:document.getElementById(`rcv_expiry_${i.id}`)?.value,
       }));
       try {
         const result = await DB.receivePurchase(p.id, { items });
@@ -262,6 +272,7 @@ const PurchasesPage = (() => {
         Modal.close();
         await _load();
       } catch(e) { Toast.err('خطأ', e.message); }
+      finally { button.disabled = false; }
     });
   }
 
@@ -324,7 +335,7 @@ const PurchasesPage = (() => {
 
     let itemCount = 0;
     const medOptions = (meds || []).map(m =>
-      `<option value="${m.id}" data-name="${m.name}" data-cost="${m.cost}">${m.name}</option>`
+      `<option value="${m.id}" data-name="${m.name}" data-cost="${m.cost*(m.conversionFactor||1)}">${m.name} — ${m.purchaseUnit||m.unit} (${m.conversionFactor||1} ${m.saleUnit||m.unit})</option>`
     ).join('');
 
     const addItem = (medId = '', medName = '', qty = 1, cost = 0) => {
@@ -337,8 +348,8 @@ const PurchasesPage = (() => {
         <select class="form-control po-med-sel" data-row="${id}">
           <option value="">اختر الدواء</option>${medOptions}
         </select>
-        <input type="number" min="1" value="${qty}" class="form-control po-qty" data-row="${id}" placeholder="كمية">
-        <input type="number" min="0" step="0.01" value="${cost}" class="form-control po-cost" data-row="${id}" placeholder="سعر الوحدة">
+        <input type="number" min="1" value="${qty}" class="form-control po-qty" data-row="${id}" title="عدد وحدات الشراء" placeholder="كمية الشراء">
+        <input type="number" min="0" step="0.01" value="${cost}" class="form-control po-cost" data-row="${id}" title="تكلفة وحدة الشراء كاملة" placeholder="تكلفة وحدة الشراء">
         <button type="button" class="btn btn-ghost btn-icon sm" onclick="document.getElementById('poItem_${id}').remove(); _calcPoTotal()" style="color:var(--err)"><i class="fas fa-trash"></i></button>`;
       document.getElementById('poItemsContainer').appendChild(row);
 
@@ -375,7 +386,7 @@ const PurchasesPage = (() => {
       const items = [];
       document.querySelectorAll('[id^="poItem_"]').forEach(row => {
         const sel  = row.querySelector('.po-med-sel');
-        const qty  = parseInt(row.querySelector('.po-qty')?.value) || 0;
+        const qty  = Number(row.querySelector('.po-qty')?.value) || 0;
         const cost = parseFloat(row.querySelector('.po-cost')?.value) || 0;
         if (sel?.value && qty > 0) {
           items.push({

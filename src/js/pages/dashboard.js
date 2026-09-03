@@ -78,6 +78,8 @@ const DashboardPage = (() => {
     try {
       const backup = await DB.getBackupStatus();
       if (backup?.stale) Toast.warn('النسخ الاحتياطي متأخر', 'مضت 3 أيام أو أكثر بدون نسخة احتياطية سليمة.');
+      if(backup?.secondary?.state==='not_configured')Toast.warn('حماية النسخ غير مكتملة','لم يتم تحديد مكان نسخة إضافية خارج مجلد المشروع. راجع إعدادات النسخ الاحتياطي.');
+      else if(backup?.secondary?.state!=='ok')Toast.warn('النسخة الإضافية تحتاج مراجعة','وصّل القرص الخارجي أو راجع اتصال مجلد الشبكة ثم أنشئ نسخة جديدة.');
     } catch (_) { /* لا نوقف لوحة التحكم بسبب فحص النسخ */ }
   }
 

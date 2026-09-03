@@ -119,9 +119,12 @@ const _LS = (() => {
       supplierId:m.supplier_id??m.supplierId??'', expiry:m.expiry??'',
       barcode:m.barcode??'', companyBarcode:m.company_barcode??m.companyBarcode??'',
       pharmacyBarcode:m.pharmacy_barcode??m.pharmacyBarcode??'',
+      controlled:Boolean(Number(m.controlled||0)), purchaseUnit:m.purchase_unit??m.purchaseUnit??m.unit,
+      saleUnit:m.sale_unit??m.saleUnit??m.unit, conversionFactor:Math.max(1,Number(m.conversion_factor??m.conversionFactor)||1),
+      scanQuantity:Number(m.scan_quantity??m.scanQuantity)||1, scanUnit:m.scan_unit??m.scanUnit??m.sale_unit??m.unit,
       controlled:Boolean(m.controlled), purchaseUnit:m.purchase_unit??m.purchaseUnit??m.unit??'علبة',
       saleUnit:m.sale_unit??m.saleUnit??m.unit??'قرص', conversionFactor:+(m.conversion_factor??m.conversionFactor??1),
-      location:m.location??'', description:m.description??'', imageData:m.image_data??m.imageData??'' };
+      location:m.location??'', description:m.description??'', imageData:m.image_data??m.imageData };
   }
   function normPat(p) {
     return { id:p.id, name:p.name, phone:p.phone, age:+p.age, gender:p.gender??'',
@@ -328,12 +331,19 @@ const DB = {
 
   /* ── normalisers (نفس المنطق للـ two modes) ─────────── */
   _normMed(m) {
+    if(!m)return null;
     return { id:m.id, name:m.name, scientificName:m.scientific_name??m.scientificName??'', manufacturer:m.manufacturer??'', batchNumber:m.batch_number??m.batchNumber??'', category:m.category, price:+m.price, cost:+m.cost,
       stock:+m.stock, minStock:+(m.min_stock??m.minStock??10), unit:m.unit??'قرص',
       supplierId:m.supplier_id??m.supplierId??'', expiry:m.expiry??'',
       barcode:m.barcode??'', companyBarcode:m.company_barcode??m.companyBarcode??'',
       pharmacyBarcode:m.pharmacy_barcode??m.pharmacyBarcode??'',
-      location:m.location??'', description:m.description??'', imageData:m.image_data??m.imageData??'' };
+      controlled:!!m.controlled,purchaseUnit:m.purchase_unit||m.purchaseUnit||m.unit,
+      saleUnit:m.sale_unit||m.saleUnit||m.unit,conversionFactor:Number(m.conversion_factor??m.conversionFactor)||1,
+      scanQuantity:Number(m.scan_quantity??m.scanQuantity)||1,scanUnit:m.scan_unit??m.scanUnit??m.unit,
+      scanRequiresConfiguration:!!m.scan_requires_configuration,
+      sellableStock:Number(m.sellable_stock??m.stock),
+      imageUrl:m.has_image ? `/api/medicine_image/${encodeURIComponent(m.id)}` : '',
+      location:m.location??'', description:m.description??'', imageData:m.image_data??m.imageData };
   },
   _normPat(p) {
     return { id:p.id, name:p.name, phone:p.phone, age:+p.age, gender:p.gender??'',
@@ -368,7 +378,7 @@ const DB = {
       stock:d.stock, min_stock:d.minStock, unit:d.unit, supplier_id:d.supplierId,
       expiry:d.expiry, barcode:d.barcode, company_barcode:d.companyBarcode??'',
       pharmacy_barcode:d.pharmacyBarcode??'', location:d.location,
-      description:d.description, image_data:d.imageData??null, controlled:d.controlled?1:0,
+      description:d.description, ...(d.imageData!==undefined?{image_data:d.imageData}:{}), controlled:d.controlled?1:0,
       purchase_unit:d.purchaseUnit||d.unit||'علبة', sale_unit:d.saleUnit||d.unit||'قرص',
       conversion_factor:Math.max(1, Number(d.conversionFactor)||1) };
   },
@@ -565,6 +575,10 @@ const DB = {
       return user ? this._normUser(user) : null;
     }
     return uid ? this.getCurrentUser(uid) : null;
+  },
+  async checkPermission(perm) {
+    if (_IS_FLASK) return _api('check_permission', {body:{perm}});
+    return Auth.getCurrent()?.role==='مدير النظام';
   },
   async logout() {
     if (_IS_FLASK) return _api('logout', {body:{}});
