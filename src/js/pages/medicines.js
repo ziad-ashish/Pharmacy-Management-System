@@ -154,7 +154,7 @@ const MedicinesPage = (() => {
       }
 
       const catHTML = `<button class="cat-chip active" data-cat="">الكل</button>` +
-        cats.map(c => `<button class="cat-chip" data-cat="${c}">${c}</button>`).join('');
+        cats.map(c => `<button class="cat-chip" data-cat="${_esc(c)}">${_esc(c)}</button>`).join('');
       document.getElementById('catFilters').innerHTML = catHTML;
       renderTable();
     } catch(e) { Toast.err('خطأ', e.message); }
@@ -194,15 +194,15 @@ const MedicinesPage = (() => {
     const draw = () => {
       tbody.innerHTML = pg.slice().map(m=>`
         <tr>
-          <td><strong>${m.barcode || '—'}</strong></td>
-          <td>${m.name}</td>
-          <td>${m.scientificName || '—'}</td>
-          <td>${m.manufacturer || '—'}</td>
-          <td><strong>${m.saleUnit || m.unit || '—'}</strong><small style="display:block;color:var(--tx-3)">شراء: ${m.purchaseUnit || m.unit || '—'} × ${m.conversionFactor||1}</small></td>
+          <td><strong>${_esc(m.barcode || '—')}</strong></td>
+          <td>${_esc(m.name)}</td>
+          <td>${_esc(m.scientificName || '—')}</td>
+          <td>${_esc(m.manufacturer || '—')}</td>
+          <td><strong>${_esc(m.saleUnit || m.unit || '—')}</strong><small style="display:block;color:var(--tx-3)">شراء: ${_esc(m.purchaseUnit || m.unit || '—')} × ${m.conversionFactor||1}</small></td>
           <td>${Fmt.money(m.price)}</td>
-          <td><strong style="color:var(--teal-600)">${m.stock} ${m.saleUnit||m.unit}</strong><small style="display:block;color:var(--tx-3)">≈ ${Math.floor(m.stock/(m.conversionFactor||1))} ${m.purchaseUnit||m.unit}</small></td>
+          <td><strong style="color:var(--teal-600)">${Fmt.num(m.stock)} ${_esc(m.saleUnit||m.unit)}</strong><small style="display:block;color:var(--tx-3)">≈ ${Fmt.num(Math.floor(m.stock/(m.conversionFactor||1)))} ${_esc(m.purchaseUnit||m.unit)}</small></td>
           <td>${Fmt.expiryBadge(m.expiry)}</td>
-          <td>${m.location || '—'}</td>
+          <td>${_esc(m.location || '—')}</td>
           <td>
             <div class="td-actions">
               <button class="btn btn-ghost btn-icon sm" data-action="units" data-id="${m.id}" title="ضبط وحدات الباركود" aria-label="ضبط وحدات الباركود"><i class="fas fa-barcode"></i></button>
@@ -265,8 +265,8 @@ const MedicinesPage = (() => {
     const defaultCategories = ['مضادات حيوية','مسكنات','أدوية السكري','القلب والأوعية','الجهاز الهضمي','فيتامينات'];
     const allCategories = [...new Set([...(categories || []), ...defaultCategories])];
 
-    const catOptions  = allCategories.map(c=>`<option value="${c}">${c}</option>`).join('');
-    const suppOptions = (suppliers||[]).map(s=>`<option value="${s.id}">${s.name}</option>`).join('');
+    const catOptions  = allCategories.map(c=>`<option value="${_esc(c)}">${_esc(c)}</option>`).join('');
+    const suppOptions = (suppliers||[]).map(s=>`<option value="${_esc(s.id)}">${_esc(s.name)}</option>`).join('');
 
     const body = `
 <form class="medicine-form" id="medicineAddForm" autocomplete="off">
@@ -799,17 +799,17 @@ const MedicinesPage = (() => {
   function editMedicine(med) {
     const body = `
       <div class="form-row cols-2">
-        <div class="form-group"><label class="form-label">اسم الدواء *</label><input class="form-control" id="eMedName" value="${med.name || ''}"></div>
-        <div class="form-group"><label class="form-label">التصنيف *</label><input class="form-control" id="eMedCategory" value="${med.category || ''}"></div>
+        <div class="form-group"><label class="form-label">اسم الدواء *</label><input class="form-control" id="eMedName" value="${_esc(med.name || '')}"></div>
+        <div class="form-group"><label class="form-label">التصنيف *</label><input class="form-control" id="eMedCategory" value="${_esc(med.category || '')}"></div>
       </div>
       <div class="form-row cols-2">
-        <div class="form-group"><label class="form-label">الاسم العلمي</label><input class="form-control" id="eMedScientific" value="${med.scientificName || ''}"></div>
-        <div class="form-group"><label class="form-label">الشركة المصنعة</label><input class="form-control" id="eMedManufacturer" value="${med.manufacturer || ''}"></div>
+        <div class="form-group"><label class="form-label">الاسم العلمي</label><input class="form-control" id="eMedScientific" value="${_esc(med.scientificName || '')}"></div>
+        <div class="form-group"><label class="form-label">الشركة المصنعة</label><input class="form-control" id="eMedManufacturer" value="${_esc(med.manufacturer || '')}"></div>
       </div>
       <div class="form-row cols-3">
         <div class="form-group"><label class="form-label">سعر البيع *</label><input class="form-control" id="eMedPrice" type="number" min="0" step="0.01" value="${med.price}"></div>
         <div class="form-group"><label class="form-label">التكلفة</label><input class="form-control" id="eMedCost" type="number" min="0" step="0.01" value="${med.cost}"></div>
-        <div class="form-group"><label class="form-label">الوحدة</label><input class="form-control" id="eMedUnit" value="${med.unit || 'قرص'}"></div>
+        <div class="form-group"><label class="form-label">الوحدة</label><input class="form-control" id="eMedUnit" value="${_esc(med.unit || 'قرص')}"></div>
       </div>
       <div class="form-row cols-3">
         <div class="form-group"><label class="form-label">المخزون *</label><input class="form-control" id="eMedStock" type="number" min="0" value="${med.stock}"></div>
@@ -817,17 +817,17 @@ const MedicinesPage = (() => {
         <div class="form-group"><label class="form-label">الصلاحية *</label><input class="form-control" id="eMedExpiry" type="date" value="${med.expiry || ''}"></div>
       </div>
       <div class="form-row cols-3">
-        <div class="form-group"><label class="form-label">باركود الشركة</label><input class="form-control" id="eMedCompanyBarcode" value="${med.companyBarcode || med.barcode || ''}"></div>
-        <div class="form-group"><label class="form-label">باركود الصيدلية</label><input class="form-control" id="eMedPharmacyBarcode" value="${med.pharmacyBarcode || ''}"></div>
-        <div class="form-group"><label class="form-label">رقم الدفعة</label><input class="form-control" id="eMedBatch" value="${med.batchNumber || ''}"></div>
+        <div class="form-group"><label class="form-label">باركود الشركة</label><input class="form-control" id="eMedCompanyBarcode" value="${_esc(med.companyBarcode || med.barcode || '')}"></div>
+        <div class="form-group"><label class="form-label">باركود الصيدلية</label><input class="form-control" id="eMedPharmacyBarcode" value="${_esc(med.pharmacyBarcode || '')}"></div>
+        <div class="form-group"><label class="form-label">رقم الدفعة</label><input class="form-control" id="eMedBatch" value="${_esc(med.batchNumber || '')}"></div>
       </div>
       <div class="form-row cols-3">
-        <div class="form-group"><label class="form-label">وحدة الشراء</label><input class="form-control" id="eMedPurchaseUnit" value="${med.purchaseUnit||med.unit||'علبة'}"></div>
-        <div class="form-group"><label class="form-label">وحدة البيع</label><input class="form-control" id="eMedSaleUnit" value="${med.saleUnit||med.unit||'قرص'}"></div>
+        <div class="form-group"><label class="form-label">وحدة الشراء</label><input class="form-control" id="eMedPurchaseUnit" value="${_esc(med.purchaseUnit||med.unit||'علبة')}"></div>
+        <div class="form-group"><label class="form-label">وحدة البيع</label><input class="form-control" id="eMedSaleUnit" value="${_esc(med.saleUnit||med.unit||'قرص')}"></div>
         <div class="form-group"><label class="form-label">معامل التحويل</label><input class="form-control" id="eMedFactor" type="number" min="1" value="${med.conversionFactor||1}"></div>
       </div>
-      <div class="form-row cols-2"><div class="form-group"><label class="form-label">الموقع</label><input class="form-control" id="eMedLocation" value="${med.location || ''}"></div><div class="form-group"><label class="form-label">التصنيف الرقابي</label><select class="form-control" id="eMedControlled"><option value="0">دواء عادي</option><option value="1" ${med.controlled?'selected':''}>خاضع للرقابة — يتطلب روشتة</option></select></div></div>
-      <div class="form-group"><label class="form-label">الوصف</label><input class="form-control" id="eMedDescription" value="${med.description || ''}"></div>`;
+      <div class="form-row cols-2"><div class="form-group"><label class="form-label">الموقع</label><input class="form-control" id="eMedLocation" value="${_esc(med.location || '')}"></div><div class="form-group"><label class="form-label">التصنيف الرقابي</label><select class="form-control" id="eMedControlled"><option value="0">دواء عادي</option><option value="1" ${med.controlled?'selected':''}>خاضع للرقابة — يتطلب روشتة</option></select></div></div>
+      <div class="form-group"><label class="form-label">الوصف</label><input class="form-control" id="eMedDescription" value="${_esc(med.description || '')}"></div>`;
 
     Modal.open({
       title: `<i class="fas fa-pen"></i> تعديل ${med.name}`,

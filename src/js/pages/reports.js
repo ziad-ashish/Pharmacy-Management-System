@@ -73,7 +73,7 @@ const ReportsPage = (() => {
       _renderTab('overview');
     } catch(e) {
       document.getElementById('rptContent').innerHTML =
-        `<div class="alert err"><i class="fas fa-circle-xmark"></i> ${e.message}</div>`;
+        `<div class="alert err"><i class="fas fa-circle-xmark"></i> ${_esc(e.message)}</div>`;
     }
   }
 
@@ -98,13 +98,13 @@ const ReportsPage = (() => {
 
     if(tab==='prescriptions'){
       const selected=new Date().toISOString().slice(0,7),report=await DB.getPrescriptionsReport(selected);
-      content.innerHTML=`<div class="card"><div class="card-head"><span class="card-title"><i class="fas fa-file-prescription"></i> روشتات ${selected}</span><span class="badge bdg-teal">${report.count} روشتة</span></div><div class="card-body p0"><div class="tbl-wrap"><table class="dtable"><thead><tr><th>الفاتورة</th><th>التاريخ</th><th>المريض</th><th>الطبيب</th><th>الترخيص</th><th>النوع</th><th>الإجمالي</th></tr></thead><tbody>${report.items.map(r=>`<tr><td>${r.invoice_num}</td><td>${Fmt.dateShort(r.date)}</td><td>${r.patient_name||'عميل عادي'}</td><td>${r.doctor_name}</td><td>${r.doctor_license}</td><td>${r.prescription_type}</td><td>${Fmt.money(r.total)}</td></tr>`).join('')||'<tr><td colspan="7">لا توجد روشتات في هذا الشهر</td></tr>'}</tbody></table></div></div></div>`;return;
+      content.innerHTML=`<div class="card"><div class="card-head"><span class="card-title"><i class="fas fa-file-prescription"></i> روشتات ${_esc(selected)}</span><span class="badge bdg-teal">${Fmt.num(report.count)} روشتة</span></div><div class="card-body p0"><div class="tbl-wrap"><table class="dtable"><thead><tr><th>الفاتورة</th><th>التاريخ</th><th>المريض</th><th>الطبيب</th><th>الترخيص</th><th>النوع</th><th>الإجمالي</th></tr></thead><tbody>${report.items.map(r=>`<tr><td>${_esc(r.invoice_num)}</td><td>${Fmt.dateShort(r.date)}</td><td>${_esc(r.patient_name||'عميل عادي')}</td><td>${_esc(r.doctor_name)}</td><td>${_esc(r.doctor_license)}</td><td>${_esc(r.prescription_type)}</td><td>${Fmt.money(r.total)}</td></tr>`).join('')||'<tr><td colspan="7">لا توجد روشتات في هذا الشهر</td></tr>'}</tbody></table></div></div></div>`;return;
     }
     if(tab==='turnover'){
-      const rows=await DB.getTurnoverReport(30);content.innerHTML=`<div class="card"><div class="card-head"><span class="card-title">معدل دوران المخزون — آخر 30 يومًا</span></div><div class="card-body p0"><div class="tbl-wrap"><table class="dtable"><thead><tr><th>الصنف</th><th>المباع</th><th>المخزون</th><th>المعدل</th><th>التصنيف</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${r.name}</td><td>${r.sold}</td><td>${r.stock}</td><td>${r.turnover_rate}</td><td><span class="badge ${r.classification==='سريع'?'bdg-ok':r.classification==='راكد'?'bdg-err':'bdg-warn'}">${r.classification}</span></td></tr>`).join('')}</tbody></table></div></div></div>`;return;
+      const rows=await DB.getTurnoverReport(30);content.innerHTML=`<div class="card"><div class="card-head"><span class="card-title">معدل دوران المخزون — آخر 30 يومًا</span></div><div class="card-body p0"><div class="tbl-wrap"><table class="dtable"><thead><tr><th>الصنف</th><th>المباع</th><th>المخزون</th><th>المعدل</th><th>التصنيف</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${_esc(r.name)}</td><td>${Fmt.num(r.sold)}</td><td>${Fmt.num(r.stock)}</td><td>${Fmt.num(r.turnover_rate)}</td><td><span class="badge ${r.classification==='سريع'?'bdg-ok':r.classification==='راكد'?'bdg-err':'bdg-warn'}">${_esc(r.classification)}</span></td></tr>`).join('')}</tbody></table></div></div></div>`;return;
     }
     if(tab==='insurance'){
-      const report=await DB.getInsuranceReport(new Date().toISOString().slice(0,7));content.innerHTML=`<div class="rpt-card" style="margin-bottom:1rem"><div class="rpt-card-val">${Fmt.money(report.total)}</div><div class="rpt-card-lbl">مستحقات شركات التأمين هذا الشهر</div></div><div class="card"><div class="card-body p0"><div class="tbl-wrap"><table class="dtable"><thead><tr><th>الفاتورة</th><th>المريض</th><th>الشركة</th><th>الوثيقة</th><th>نصيب التأمين</th><th>نصيب المريض</th></tr></thead><tbody>${report.items.map(r=>`<tr><td>${r.invoice_num}</td><td>${r.patient_name}</td><td>${r.insurance_company}</td><td>${r.policy_number}</td><td>${Fmt.money(r.insurance_amount)}</td><td>${Fmt.money(r.patient_amount)}</td></tr>`).join('')||'<tr><td colspan="6">لا توجد مطالبات تأمين</td></tr>'}</tbody></table></div></div></div>`;return;
+      const report=await DB.getInsuranceReport(new Date().toISOString().slice(0,7));content.innerHTML=`<div class="rpt-card" style="margin-bottom:1rem"><div class="rpt-card-val">${Fmt.money(report.total)}</div><div class="rpt-card-lbl">مستحقات شركات التأمين هذا الشهر</div></div><div class="card"><div class="card-body p0"><div class="tbl-wrap"><table class="dtable"><thead><tr><th>الفاتورة</th><th>المريض</th><th>الشركة</th><th>الوثيقة</th><th>نصيب التأمين</th><th>نصيب المريض</th></tr></thead><tbody>${report.items.map(r=>`<tr><td>${_esc(r.invoice_num)}</td><td>${_esc(r.patient_name)}</td><td>${_esc(r.insurance_company)}</td><td>${_esc(r.policy_number)}</td><td>${Fmt.money(r.insurance_amount)}</td><td>${Fmt.money(r.patient_amount)}</td></tr>`).join('')||'<tr><td colspan="6">لا توجد مطالبات تأمين</td></tr>'}</tbody></table></div></div></div>`;return;
     }
 
     /* ── نظرة عامة ─────────────────────────────────────── */
@@ -133,7 +133,7 @@ const ReportsPage = (() => {
             const max = topMeds[0]?.qty || 1;
             return `<div style="display:flex;align-items:center;gap:1rem;margin-bottom:.75rem">
               <span style="min-width:24px;font-weight:700;color:var(--tx-3)">${i + 1}</span>
-              <span style="flex:1;font-weight:600">${m.name}</span>
+              <span style="flex:1;font-weight:600">${_esc(m.name)}</span>
               <div style="flex:2"><div class="progress" style="height:9px">
                 <div class="progress-fill" style="width:${Math.round(m.qty / max * 100)}%;background:${['var(--teal-500)', 'var(--amb-400)', 'var(--ok)', 'var(--sl-400)', 'var(--sl-300)'][i]}"></div>
               </div></div>
@@ -159,15 +159,15 @@ const ReportsPage = (() => {
         <div class="card-body p0"><div class="tbl-wrap"><table class="dtable">
           <thead><tr><th>الفاتورة</th><th>التاريخ</th><th>العميل</th><th>أصناف</th><th>الخصم</th><th>الضريبة</th><th>الإجمالي</th><th>الدفع</th><th>الحالة</th></tr></thead>
           <tbody>${(sales || []).map(s => `<tr style="${s.status === 'ملغاة' ? 'opacity:.55' : ''}">
-            <td><strong>${s.invoiceNum}</strong></td>
-            <td>${Fmt.dateShort(s.date)} ${s.time}</td>
-            <td>${s.patientName}</td>
+            <td><strong>${_esc(s.invoiceNum)}</strong></td>
+            <td>${Fmt.dateShort(s.date)} ${_esc(s.time)}</td>
+            <td>${_esc(s.patientName)}</td>
             <td>${(s.items || []).length}</td>
             <td>${s.discount > 0 ? Fmt.money(s.discount) : '—'}</td>
             <td>${Fmt.money(s.tax)}</td>
             <td style="font-weight:700;color:var(--teal-600)">${Fmt.money(s.total)}</td>
-            <td><span class="badge bdg-teal">${s.paymentMethod}</span></td>
-            <td><span class="badge ${s.status === 'ملغاة' ? 'bdg-err' : 'bdg-ok'}">${s.status}</span></td>
+            <td><span class="badge bdg-teal">${_esc(s.paymentMethod)}</span></td>
+            <td><span class="badge ${s.status === 'ملغاة' ? 'bdg-err' : 'bdg-ok'}">${_esc(s.status)}</span></td>
           </tr>`).join('')}</tbody>
         </table></div></div>
       </div>`;
@@ -199,8 +199,8 @@ const ReportsPage = (() => {
         <div class="card-body p0"><div class="tbl-wrap"><table class="dtable">
           <thead><tr><th>الدواء</th><th>الفئة</th><th>المخزون</th><th>الحد الأدنى</th><th>الحالة</th></tr></thead>
           <tbody>${low.map(m => `<tr>
-            <td class="font-bold">${m.name}</td><td>${m.category}</td>
-            <td style="color:${m.stock === 0 ? 'var(--err)' : 'var(--warn)'};font-weight:700">${m.stock} ${m.unit}</td>
+            <td class="font-bold">${_esc(m.name)}</td><td>${_esc(m.category)}</td>
+            <td style="color:${m.stock === 0 ? 'var(--err)' : 'var(--warn)'};font-weight:700">${Fmt.num(m.stock)} ${_esc(m.unit)}</td>
             <td>${m.minStock}</td>
             <td>${m.stock === 0 ? '<span class="badge bdg-err">نفد</span>' : '<span class="badge bdg-warn">منخفض</span>'}</td>
           </tr>`).join('')}</tbody>
@@ -286,7 +286,7 @@ const ReportsPage = (() => {
           <tbody>${p.by_medicine.map(m => {
             const mColor = m.margin_pct >= 20 ? 'var(--ok)' : m.margin_pct >= 10 ? 'var(--warn)' : 'var(--err)';
             return `<tr>
-              <td class="font-bold">${m.name}</td>
+              <td class="font-bold">${_esc(m.name)}</td>
               <td>${Fmt.num(m.qty_sold)}</td>
               <td style="color:var(--teal-600);font-weight:700">${Fmt.money(m.revenue)}</td>
               <td style="color:var(--err)">${Fmt.money(m.total_cost)}</td>
@@ -401,9 +401,9 @@ const ReportsPage = (() => {
             const isVery = m.daysSince >= 180;
             const neverSold = !m.lastSale;
             return `<tr>
-              <td class="font-bold">${m.name}</td>
-              <td>${m.category}</td>
-              <td>${m.stock} ${m.unit}</td>
+              <td class="font-bold">${_esc(m.name)}</td>
+              <td>${_esc(m.category)}</td>
+              <td>${Fmt.num(m.stock)} ${_esc(m.unit)}</td>
               <td style="color:var(--err)">${Fmt.money(m.cost * m.stock)}</td>
               <td style="color:var(--tx-3)">${neverSold ? 'لم يُباع قط' : Fmt.dateShort(m.lastSale)}</td>
               <td style="font-weight:700;color:${isVery ? 'var(--err)' : 'var(--warn)'}">

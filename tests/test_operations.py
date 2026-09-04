@@ -18,9 +18,11 @@ class OperationsTests(unittest.TestCase):
     login = web_auth.WebAuthenticationTests.login
 
     def medicine(self, **extra):
-        result=json.loads(api.PharmacyAPI().add_medicine(json.dumps(dict(
+        payload=dict(
             name='صنف اختبار',category='اختبار',price=10,cost=4,stock=40,unit='قرص',
-            purchase_unit='علبة',sale_unit='قرص',conversion_factor=20,expiry='2099-01-01',**extra))))
+            purchase_unit='علبة',sale_unit='قرص',conversion_factor=20,expiry='2099-01-01')
+        payload.update(extra)
+        result=json.loads(api.PharmacyAPI().add_medicine(json.dumps(payload)))
         self.assertTrue(result['ok'],result)
         return result['data']
 
@@ -72,6 +74,26 @@ class OperationsTests(unittest.TestCase):
             result=json.loads(service.receive_purchase(po['id'],json.dumps({'items':[{'item_id':line,'qty_received':1,**extra}]})))
             self.assertFalse(result['ok'],result)
         self.assertEqual(json.loads(service.get_medicine(mid))['data']['stock'],40)
+
+    def test_credit_sale_requires_name_and_records_first_payment(self):
+        mid=self.medicine();service=api.PharmacyAPI()
+        missing=json.loads(service.add_sale(json.dumps(self.sale(mid,payment_method='آجل',credit_paid_amount=2))))
+        self.assertFalse(missing['ok'],missing)
+        result=json.loads(service.add_sale(json.dumps(self.sale(
+            mid,payment_method='آجل',credit_customer_name='عميل آجل',
+            credit_phone='01012345678',credit_paid_amount=4))))
+        self.assertTrue(result['ok'],result)
+        self.assertEqual(result['data']['creditPaid'],4)
+        self.assertEqual(result['data']['creditRemaining'],6)
+        with closing(api._conn()) as con:
+            patient=con.execute('SELECT name,phone FROM patients WHERE id=?',(result['data']['patientId'],)).fetchone()
+            debt=con.execute('SELECT amount,paid_amount,status FROM debts WHERE sale_id=?',(result['data']['id'],)).fetchone()
+            self.assertEqual((patient['name'],patient['phone']),('عميل آجل','01012345678'))
+            self.assertEqual((debt['amount'],debt['paid_amount'],debt['status']),(10,4,'مسدد جزئياً'))
+        rejected=json.loads(service.add_sale(json.dumps(self.sale(
+            mid,payment_method='آجل',credit_customer_name='عميل آخر',credit_paid_amount=11))))
+        self.assertFalse(rejected['ok'],rejected)
+        self.assertEqual(json.loads(service.get_medicine(mid))['data']['stock'],39)
 
     def test_fefo_never_consumes_expired_and_void_restores_exact_batches(self):
         mid=self.medicine();service=api.PharmacyAPI()
@@ -150,6 +172,47 @@ class OperationsTests(unittest.TestCase):
                 self.assertTrue(failed['secondary_error']);self.assertTrue(os.path.isfile(failed['path']))
                 self.assertEqual(backup_store.status()['state'],'failed')
             finally: api.BACKUP_DIR=previous
+
+    def test_backup_retention_keeps_five_managed_files_only(self):
+        self.login();self.medicine()
+        previous=api.BACKUP_DIR
+        with tempfile.TemporaryDirectory() as extra:
+            try:
+                api.BACKUP_DIR=os.path.join(self.tmp.name,'backups')
+                self.assertTrue(self.client.post('/api/secondary_backup',json={'directory':extra}).json['ok'])
+                unrelated=os.path.join(extra,'my_database.db')
+                with open(unrelated,'wb') as handle: handle.write(b'keep me')
+                with open(os.path.join(extra,'auto_pharmacy_old.db'),'wb') as handle: handle.write(b'old managed backup')
+                for _ in range(7): backup_store.run_backup()
+                local=[name for name in os.listdir(api.BACKUP_DIR) if name.startswith('pharmacy_')]
+                secondary=[name for name in os.listdir(extra) if name.startswith(('pharmacy_','auto_pharmacy_'))]
+                self.assertEqual(len(local),5)
+                self.assertEqual(len(secondary),5)
+                self.assertTrue(os.path.isfile(unrelated))
+            finally: api.BACKUP_DIR=previous
+
+    def test_restore_rejects_outside_or_invalid_files_and_restores_verified_snapshot(self):
+        self.login()
+        snapshot = backup_store.run_backup('system-test')
+        outside = os.path.join(self.tmp.name, 'outside.db')
+        with closing(sqlite3.connect(outside)) as con:
+            con.execute('CREATE TABLE fake(value TEXT)')
+        denied = self.client.post('/api/restore_database', json={'backup_path': outside}).json
+        self.assertFalse(denied['ok'], denied)
+
+        invalid = os.path.join(api.BACKUP_DIR, 'pharmacy_backup_invalid.db')
+        with closing(sqlite3.connect(invalid)) as con:
+            con.execute('CREATE TABLE fake(value TEXT)')
+        rejected = self.client.post('/api/restore_database', json={'backup_path': invalid}).json
+        self.assertFalse(rejected['ok'], rejected)
+
+        created = self.medicine(name='صنف بعد النسخة')
+        restored = self.client.post('/api/restore_database', json={'backup_path': snapshot['path']}).json
+        self.assertTrue(restored['ok'], restored)
+        self.assertIsNone(json.loads(api.PharmacyAPI().get_medicine(created))['data'])
+        self.assertTrue(os.path.isfile(restored['data']['pre_backup']))
+        with closing(sqlite3.connect(restored['data']['pre_backup'])) as con:
+            self.assertEqual(con.execute('PRAGMA quick_check').fetchone()[0], 'ok')
 
 
 if __name__=='__main__':unittest.main()

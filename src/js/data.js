@@ -468,7 +468,10 @@ const DB = {
   async addSale(data)       {
     if (_IS_FLASK) return _api('add_sale', {body: this._withUser({...data,
       patient_id:data.patientId??data.patient_id??null, patient_name:data.patientName??data.patient_name??'',
-      payment_method:data.paymentMethod??data.payment_method??'نقدي', use_loyalty:Boolean(data.useLoyalty??data.use_loyalty)
+      payment_method:data.paymentMethod??data.payment_method??'نقدي', use_loyalty:Boolean(data.useLoyalty??data.use_loyalty),
+      credit_customer_name:data.creditCustomerName??data.credit_customer_name??'',
+      credit_phone:data.creditPhone??data.credit_phone??'',
+      credit_paid_amount:data.creditPaidAmount??data.credit_paid_amount??0
     })});
     return _LS.addSale(data);
   },

@@ -16,8 +16,8 @@ const Toast = (() => {
     t.innerHTML = `
       <div class="t-icon"><i class="fas ${icons[type]||icons.info}"></i></div>
       <div class="t-body">
-        <div class="t-title">${title}</div>
-        ${msg ? `<div class="t-msg">${msg}</div>` : ''}
+        <div class="t-title">${_esc(title)}</div>
+        ${msg ? `<div class="t-msg">${_esc(msg)}</div>` : ''}
       </div>
       <button class="t-close" aria-label="إغلاق"><i class="fas fa-xmark"></i></button>`;
 
@@ -78,11 +78,11 @@ const Modal = (() => {
 
   function confirm(title, msg, onYes, yesLabel='تأكيد', yesClass='btn-danger') {
     open({
-      title: `<i class="fas fa-triangle-exclamation"></i> ${title}`,
-      body: `<p style="font-size:.9rem;color:var(--tx-2);line-height:1.7">${msg}</p>`,
+      title: `<i class="fas fa-triangle-exclamation"></i> ${_esc(title)}`,
+      body: `<p style="font-size:.9rem;color:var(--tx-2);line-height:1.7">${_esc(msg)}</p>`,
       foot: `
         <button class="btn btn-ghost" id="modalCancelBtn">إلغاء</button>
-        <button class="btn ${yesClass}" id="modalConfirmBtn">${yesLabel}</button>`,
+        <button class="btn ${/^[a-z0-9 _-]+$/i.test(yesClass) ? yesClass : 'btn-danger'}" id="modalConfirmBtn">${_esc(yesLabel)}</button>`,
       onConfirm: onYes,
     });
     document.getElementById('modalCancelBtn')?.addEventListener('click', close);
@@ -217,8 +217,8 @@ function renderBarChart(containerId, labels, values, color='var(--teal-400)') {
   el.innerHTML = values.map((v,i) => `
     <div class="bc-col">
       <div class="bc-val">${v > 0 ? Fmt.money(v,'') : ''}</div>
-      <div class="bc-bar" style="height:${Math.round((v/max)*100)}%;background:${color}" title="${labels[i]}: ${Fmt.money(v)}"></div>
-      <div class="bc-lbl">${labels[i]}</div>
+      <div class="bc-bar" style="height:${Math.round((v/max)*100)}%;background:${color}" title="${_esc(labels[i])}: ${Fmt.money(v)}"></div>
+      <div class="bc-lbl">${_esc(labels[i])}</div>
     </div>`).join('');
 }
 
@@ -242,8 +242,8 @@ function renderDonut(containerId, segments, centerVal, centerLabel) {
   const legend = segments.map((s,i) => `
     <div class="dl-item">
       <div class="dl-dot" style="background:${colors[i%colors.length]}"></div>
-      <span class="dl-name">${s.label}</span>
-      <span class="dl-val">${s.value}</span>
+      <span class="dl-name">${_esc(s.label)}</span>
+      <span class="dl-val">${Fmt.num(s.value)}</span>
     </div>`).join('');
 
   el.innerHTML = `
@@ -254,8 +254,8 @@ function renderDonut(containerId, segments, centerVal, centerLabel) {
           ${segs}
         </svg>
         <div class="donut-center">
-          <div class="dc-val">${centerVal}</div>
-          <div class="dc-lbl">${centerLabel}</div>
+          <div class="dc-val">${_esc(centerVal)}</div>
+          <div class="dc-lbl">${_esc(centerLabel)}</div>
         </div>
       </div>
       <div class="donut-legend">${legend}</div>
@@ -321,14 +321,20 @@ function Paginator(items, perPage=10) {
 // before the browser could process the download → silent failure in some
 // environments. Wrapped in a short setTimeout.
 function exportCSV(filename, headers, rows) {
+  const cell = value => {
+    let text = String(value ?? '');
+    // Prevent spreadsheet formula injection when exported user data is opened.
+    if (/^[\s\t\r\n]*[=+\-@]/.test(text)) text = "'" + text;
+    return `"${text.replace(/"/g,'""')}"`;
+  };
   const bom  = '\uFEFF';
-  const head = headers.join(',');
-  const body = rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const head = headers.map(cell).join(',');
+  const body = rows.map(r => r.map(cell).join(',')).join('\n');
   const blob = new Blob([bom+head+'\n'+body], {type:'text/csv;charset=utf-8;'});
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement('a');
   a.href     = url;
-  a.download = filename + '.csv';
+  a.download = String(filename || 'export').replace(/[\\/:*?"<>|]/g, '_') + '.csv';
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 150); // ← was immediate, now deferred
   Toast.ok('تم التصدير', `تم تصدير ${filename}.csv بنجاح`);

@@ -116,21 +116,21 @@ const PatientsPage = (() => {
       const color = getAvatarColor(p.name);
       const sales = _allSales.filter(s=>s.patientId===p.id);
       return `
-      <div class="pt-card" data-id="${p.id}">
-        <div style="width:50px;height:50px;min-width:50px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;font-size:1.1rem;font-weight:700;color:#fff">${p.name.slice(0,2)}</div>
+      <div class="pt-card" data-id="${_esc(p.id)}">
+        <div style="width:50px;height:50px;min-width:50px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;font-size:1.1rem;font-weight:700;color:#fff">${_esc(p.name.slice(0,2))}</div>
         <div class="pt-info">
-          <div class="pt-name">${p.name}</div>
-          <div class="pt-meta"><i class="fas fa-phone" style="font-size:.7rem"></i> ${p.phone} &nbsp;•&nbsp; ${p.age} سنة &nbsp;•&nbsp; ${p.gender}</div>
+          <div class="pt-name">${_esc(p.name)}</div>
+          <div class="pt-meta"><i class="fas fa-phone" style="font-size:.7rem"></i> ${_esc(p.phone)} &nbsp;•&nbsp; ${Fmt.num(p.age)} سنة &nbsp;•&nbsp; ${_esc(p.gender)}</div>
           <div class="pt-tags">
-            <span class="badge bdg-teal"><i class="fas fa-tint"></i> ${p.bloodType}</span>
-            ${p.allergies&&p.allergies!=='لا يوجد'?`<span class="badge bdg-err">${p.allergies}</span>`:''}
-            ${p.chronicDiseases&&p.chronicDiseases!=='لا يوجد'?`<span class="badge bdg-amb">${p.chronicDiseases}</span>`:''}
+            <span class="badge bdg-teal"><i class="fas fa-tint"></i> ${_esc(p.bloodType)}</span>
+            ${p.allergies&&p.allergies!=='لا يوجد'?`<span class="badge bdg-err">${_esc(p.allergies)}</span>`:''}
+            ${p.chronicDiseases&&p.chronicDiseases!=='لا يوجد'?`<span class="badge bdg-amb">${_esc(p.chronicDiseases)}</span>`:''}
             <span class="badge bdg-slate"><i class="fas fa-receipt"></i> ${sales.length} فاتورة</span>
           </div>
         </div>
         <div style="display:flex;flex-direction:column;gap:.4rem">
-          <button class="btn btn-outline btn-icon sm" data-action="edit" data-id="${p.id}" title="تعديل"><i class="fas fa-pen"></i></button>
-          <button class="btn btn-danger btn-icon sm" data-action="del"  data-id="${p.id}" title="حذف"><i class="fas fa-trash"></i></button>
+          <button class="btn btn-outline btn-icon sm" data-action="edit" data-id="${_esc(p.id)}" title="تعديل"><i class="fas fa-pen"></i></button>
+          <button class="btn btn-danger btn-icon sm" data-action="del"  data-id="${_esc(p.id)}" title="حذف"><i class="fas fa-trash"></i></button>
         </div>
       </div>`;
     }).join('');
@@ -161,18 +161,18 @@ const PatientsPage = (() => {
     const pg=Paginator(list,8);
     const draw=()=>{
       tbody.innerHTML=pg.slice().map(p=>`
-        <tr data-id="${p.id}" style="cursor:pointer">
-          <td><code style="font-size:.75rem">${p.id}</code></td>
-          <td class="font-bold">${p.name}</td>
-          <td dir="ltr">${p.phone}</td>
-          <td>${p.age}</td>
-          <td><span class="badge bdg-teal">${p.bloodType}</span></td>
-          <td>${p.chronicDiseases||'—'}</td>
+        <tr data-id="${_esc(p.id)}" style="cursor:pointer">
+          <td><code style="font-size:.75rem">${_esc(p.id)}</code></td>
+          <td class="font-bold">${_esc(p.name)}</td>
+          <td dir="ltr">${_esc(p.phone)}</td>
+          <td>${Fmt.num(p.age)}</td>
+          <td><span class="badge bdg-teal">${_esc(p.bloodType)}</span></td>
+          <td>${_esc(p.chronicDiseases||'—')}</td>
           <td>${Fmt.dateShort(p.createdAt)}</td>
           <td>
             <div class="td-actions">
-              <button class="btn btn-outline btn-icon sm" data-action="edit" data-id="${p.id}"><i class="fas fa-pen"></i></button>
-              <button class="btn btn-danger btn-icon sm" data-action="del"  data-id="${p.id}"><i class="fas fa-trash"></i></button>
+              <button class="btn btn-outline btn-icon sm" data-action="edit" data-id="${_esc(p.id)}"><i class="fas fa-pen"></i></button>
+              <button class="btn btn-danger btn-icon sm" data-action="del"  data-id="${_esc(p.id)}"><i class="fas fa-trash"></i></button>
             </div>
           </td>
         </tr>`).join('');
@@ -196,9 +196,9 @@ const PatientsPage = (() => {
     return `
     <div class="form-row cols-2">
       <div class="form-group"><label class="form-label">الاسم الكامل <span class="req">*</span></label>
-        <input class="form-control" id="fPtName" value="${p.name||''}" /></div>
+        <input class="form-control" id="fPtName" value="${_esc(p.name||'')}" /></div>
       <div class="form-group"><label class="form-label">رقم الجوال <span class="req">*</span></label>
-        <input class="form-control" id="fPtPhone" value="${p.phone||''}" dir="ltr" /></div>
+        <input class="form-control" id="fPtPhone" value="${_esc(p.phone||'')}" dir="ltr" /></div>
     </div>
     <div class="form-row cols-3">
       <div class="form-group"><label class="form-label">العمر</label>
@@ -215,19 +215,19 @@ const PatientsPage = (() => {
     </div>
     <div class="form-row cols-2">
       <div class="form-group"><label class="form-label">الحساسية الدوائية</label>
-        <input class="form-control" id="fPtAllergy" value="${p.allergies||'لا يوجد'}" /></div>
+        <input class="form-control" id="fPtAllergy" value="${_esc(p.allergies||'لا يوجد')}" /></div>
       <div class="form-group"><label class="form-label">الأمراض المزمنة</label>
-        <input class="form-control" id="fPtChronic" value="${p.chronicDiseases||'لا يوجد'}" /></div>
+        <input class="form-control" id="fPtChronic" value="${_esc(p.chronicDiseases||'لا يوجد')}" /></div>
     </div>
     <div class="form-group"><label class="form-label">العنوان</label>
-      <input class="form-control" id="fPtAddr" value="${p.address||''}" /></div>
+      <input class="form-control" id="fPtAddr" value="${_esc(p.address||'')}" /></div>
     <div class="form-row cols-3">
-      <div class="form-group"><label class="form-label">شركة التأمين</label><input class="form-control" id="fPtInsurance" value="${p.insuranceCompany||''}"></div>
-      <div class="form-group"><label class="form-label">رقم الوثيقة</label><input class="form-control" id="fPtPolicy" value="${p.policyNumber||''}"></div>
+      <div class="form-group"><label class="form-label">شركة التأمين</label><input class="form-control" id="fPtInsurance" value="${_esc(p.insuranceCompany||'')}"></div>
+      <div class="form-group"><label class="form-label">رقم الوثيقة</label><input class="form-control" id="fPtPolicy" value="${_esc(p.policyNumber||'')}"></div>
       <div class="form-group"><label class="form-label">نسبة التغطية %</label><input class="form-control" id="fPtCoverage" type="number" min="0" max="100" value="${p.coveragePct||0}"></div>
     </div>
     <div class="form-group"><label class="form-label">ملاحظات</label>
-      <textarea class="form-control" id="fPtNotes" rows="2">${p.notes||''}</textarea></div>`;
+      <textarea class="form-control" id="fPtNotes" rows="2">${_esc(p.notes||'')}</textarea></div>`;
   }
 
   function openAdd() {
@@ -243,7 +243,7 @@ const PatientsPage = (() => {
   function openEdit(id) {
     const p=_allPats.find(x=>x.id===id); if(!p) return;
     Modal.open({
-      title:`<i class="fas fa-pen"></i> تعديل: ${p.name}`,
+      title:`<i class="fas fa-pen"></i> تعديل: ${_esc(p.name)}`,
       size:'lg', body:_formHTML(p),
       foot:`<button class="btn btn-primary" id="savePtBtn"><i class="fas fa-check"></i> حفظ</button>
             <button class="btn btn-ghost" onclick="Modal.close()">إلغاء</button>`,
@@ -279,31 +279,31 @@ const PatientsPage = (() => {
     const sales=_allSales.filter(s=>s.patientId===id);
     const color=getAvatarColor(p.name);
     Modal.open({
-      title:`<i class="fas fa-user-injured"></i> ${p.name}`,
+      title:`<i class="fas fa-user-injured"></i> ${_esc(p.name)}`,
       size:'lg',
       body:`
         <div style="display:flex;gap:1rem;align-items:flex-start;margin-bottom:1rem">
-          <div style="width:62px;height:62px;min-width:62px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;font-size:1.4rem;font-weight:700;color:#fff">${p.name.slice(0,2)}</div>
+          <div style="width:62px;height:62px;min-width:62px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;font-size:1.4rem;font-weight:700;color:#fff">${_esc(p.name.slice(0,2))}</div>
           <div>
-            <div style="font-size:1.1rem;font-weight:700">${p.name}</div>
-            <div style="color:var(--tx-3);font-size:.82rem;margin-top:3px">${p.age} سنة &nbsp;•&nbsp; ${p.gender} &nbsp;•&nbsp; ${p.bloodType}</div>
+            <div style="font-size:1.1rem;font-weight:700">${_esc(p.name)}</div>
+            <div style="color:var(--tx-3);font-size:.82rem;margin-top:3px">${Fmt.num(p.age)} سنة &nbsp;•&nbsp; ${_esc(p.gender)} &nbsp;•&nbsp; ${_esc(p.bloodType)}</div>
           </div>
         </div>
-        <div class="detail-row"><span class="dr-label">الجوال</span><span class="dr-val" dir="ltr">${p.phone}</span></div>
-        <div class="detail-row"><span class="dr-label">الحساسية</span><span class="dr-val" style="color:${p.allergies&&p.allergies!=='لا يوجد'?'var(--err)':'inherit'}">${p.allergies||'—'}</span></div>
-        <div class="detail-row"><span class="dr-label">الأمراض المزمنة</span><span class="dr-val">${p.chronicDiseases||'—'}</span></div>
-        <div class="detail-row"><span class="dr-label">العنوان</span><span class="dr-val">${p.address||'—'}</span></div>
-        <div class="detail-row"><span class="dr-label">التأمين</span><span class="dr-val">${p.insuranceCompany?`${p.insuranceCompany} — تغطية ${p.coveragePct}%`:'لا يوجد'}</span></div>
-        <div class="detail-row"><span class="dr-label">الملاحظات</span><span class="dr-val">${p.notes||'—'}</span></div>
+        <div class="detail-row"><span class="dr-label">الجوال</span><span class="dr-val" dir="ltr">${_esc(p.phone)}</span></div>
+        <div class="detail-row"><span class="dr-label">الحساسية</span><span class="dr-val" style="color:${p.allergies&&p.allergies!=='لا يوجد'?'var(--err)':'inherit'}">${_esc(p.allergies||'—')}</span></div>
+        <div class="detail-row"><span class="dr-label">الأمراض المزمنة</span><span class="dr-val">${_esc(p.chronicDiseases||'—')}</span></div>
+        <div class="detail-row"><span class="dr-label">العنوان</span><span class="dr-val">${_esc(p.address||'—')}</span></div>
+        <div class="detail-row"><span class="dr-label">التأمين</span><span class="dr-val">${p.insuranceCompany?`${_esc(p.insuranceCompany)} — تغطية ${Fmt.num(p.coveragePct)}%`:'لا يوجد'}</span></div>
+        <div class="detail-row"><span class="dr-label">الملاحظات</span><span class="dr-val">${_esc(p.notes||'—')}</span></div>
         <div class="detail-row"><span class="dr-label">تاريخ التسجيل</span><span class="dr-val">${Fmt.date(p.createdAt)}</span></div>
         <div class="divider"></div>
         <div style="font-weight:700;font-size:.88rem;margin-bottom:.75rem"><i class="fas fa-receipt" style="color:var(--teal-500)"></i> سجل المشتريات (${sales.length})</div>
         ${sales.length?`<div class="tbl-wrap"><table class="dtable">
           <thead><tr><th>الفاتورة</th><th>التاريخ</th><th>الإجمالي</th><th>الدفع</th></tr></thead>
           <tbody>${sales.map(s=>`<tr>
-            <td>${s.invoiceNum}</td><td>${Fmt.dateShort(s.date)}</td>
+            <td>${_esc(s.invoiceNum)}</td><td>${Fmt.dateShort(s.date)}</td>
             <td style="font-weight:700;color:var(--teal-600)">${Fmt.money(s.total)}</td>
-            <td><span class="badge bdg-teal">${s.paymentMethod}</span></td>
+            <td><span class="badge bdg-teal">${_esc(s.paymentMethod)}</span></td>
           </tr>`).join('')}</tbody>
         </table></div>`:`<p style="color:var(--tx-3);font-size:.84rem">لا توجد فواتير بعد</p>`}`,
       foot:`<button class="btn btn-outline" onclick="Modal.close();PatientsPage.openEdit('${id}')"><i class="fas fa-pen"></i> تعديل</button>
@@ -313,7 +313,7 @@ const PatientsPage = (() => {
 
   function deletePt(id) {
     const p=_allPats.find(x=>x.id===id); if(!p) return;
-    Modal.confirm('حذف المريض',`هل تريد حذف <strong>${p.name}</strong>؟`, async()=>{
+    Modal.confirm('حذف المريض',`هل تريد حذف ${p.name}؟`, async()=>{
       try{await DB.deletePatient(id);Toast.ok('تم الحذف',`تم حذف ${p.name}`);await _load();}
       catch(e){Toast.err('خطأ',e.message);}
     });

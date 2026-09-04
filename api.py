@@ -21,7 +21,7 @@
 #  [3.16] audit_log table + get_audit_log
 # ══════════════════════════════════════════════════════════════
 
-import sqlite3, json, os, uuid, hashlib, hmac, secrets, shutil, csv, io
+import sqlite3, json, os, uuid, hashlib, hmac, secrets, csv, io, math, re
 
 def light_columns(con, alias=""):
     from pharmacy_ops import light_columns as columns
@@ -110,6 +110,19 @@ _ROLE_PERMS = {
     "صيدلاني مسؤول":  {"sales","medicines","patients","suppliers","reports","invoices"},
     "مساعد صيدلي":    {"sales","medicines_view","invoices_view"},
 }
+_ALLOWED_ROLES = frozenset(_ROLE_PERMS)
+
+
+def _password_policy_error(password, allow_forced_default=False):
+    if not isinstance(password, str):
+        return "كلمة المرور غير صالحة"
+    if allow_forced_default and password == "123456":
+        return ""
+    if len(password) < 8:
+        return "كلمة المرور يجب ألا تقل عن 8 أحرف"
+    if len(password) > 128:
+        return "كلمة المرور أطول من الحد المسموح"
+    return ""
 
 def _has_perm(role: str, perm: str) -> bool:
     perms = _ROLE_PERMS.get(role, set())
@@ -976,6 +989,36 @@ class PharmacyAPI:
             s_time = now.strftime("%H:%M")
 
             total_due = round(subtotal_value - discount_value + tax_amount, 2)
+            payment_method = str(d.get("payment_method", "نقدي") or "نقدي").strip()
+            credit_paid = 0.0
+            if payment_method == "آجل":
+                credit_name = str(d.get("credit_customer_name", "") or "").strip()
+                credit_phone = str(d.get("credit_phone", "") or "").strip()
+                linked_patient = None
+                if d.get("patient_id"):
+                    linked_patient = con.execute("SELECT id,name,phone FROM patients WHERE id=? AND is_active=1", (d["patient_id"],)).fetchone()
+                    if not linked_patient:
+                        raise ValueError("العميل المختار غير موجود")
+                    # Backward-compatible API callers can use the already registered name.
+                    credit_name = credit_name or str(linked_patient["name"] or "").strip()
+                    credit_phone = credit_phone or str(linked_patient["phone"] or "").strip()
+                if len(credit_name) < 2 or len(credit_name) > 100:
+                    raise ValueError("البيع الآجل يتطلب اسم عميل صحيح")
+                if len(credit_phone) > 30:
+                    raise ValueError("رقم هاتف العميل غير صحيح")
+                try:
+                    credit_paid = float(d.get("credit_paid_amount", 0) or 0)
+                except (TypeError, ValueError):
+                    raise ValueError("المبلغ المدفوع غير صحيح")
+                if not math.isfinite(credit_paid) or credit_paid < 0:
+                    raise ValueError("المبلغ المدفوع يجب أن يكون صفرًا أو أكثر")
+                credit_paid = round(credit_paid, 2)
+                if not d.get("patient_id"):
+                    d["patient_id"] = _new_id("P")
+                    con.execute("INSERT INTO patients(id,name,phone,created_at,is_active) VALUES(?,?,?,?,1)",
+                                (d["patient_id"], credit_name, credit_phone or None, date.today().isoformat()))
+                    _audit(con, user_id, "ADD", "patient", d["patient_id"], "إنشاء تلقائي من بيع آجل: "+credit_name)
+                d["patient_name"] = credit_name
             insurance_amount = 0.0
             patient_amount = total_due
             if d.get("patient_id"):
@@ -997,6 +1040,9 @@ class PharmacyAPI:
                     patient_amount = round(patient_amount-loyalty_discount,2)
                     total_due = round(total_due-loyalty_discount,2)
 
+            if payment_method == "آجل" and credit_paid > patient_amount:
+                raise ValueError("المبلغ المدفوع أكبر من المطلوب على العميل")
+
             con.execute(
                 "INSERT INTO sales(id,invoice_num,invoice_seq,invoice_year,"
                 "patient_id,patient_name,subtotal,discount,tax,total,"
@@ -1005,7 +1051,7 @@ class PharmacyAPI:
                 (nid, inv, seq, yr,
                  d.get("patient_id"), d.get("patient_name"),
                  subtotal_value, discount_value, tax_amount, total_due,
-                 d.get("payment_method","نقدي"), d.get("cashier",""),
+                 payment_method, d.get("cashier",""),
                  s_date, s_time, "مكتمل",insurance_amount,patient_amount,loyalty_discount)
             )
             for item in items:
@@ -1037,17 +1083,16 @@ class PharmacyAPI:
                 for position, page in enumerate(pages):
                     con.execute("INSERT INTO prescription_pages VALUES(?,?,?,?)",(_new_id("RXP"),rx_id,position,page))
                 _audit(con, user_id, "ADD_PRESCRIPTION", "prescription", rx_id, f"فاتورة {inv}")
-            if d.get("payment_method") == "آجل":
-                if not d.get("patient_id"):
-                    con.rollback(); con.close(); return _err("البيع الآجل يتطلب اختيار مريض")
+            if payment_method == "آجل":
                 debt_id = _new_id("DEBT")
+                debt_status = "مسدد" if credit_paid >= patient_amount else "مسدد جزئياً" if credit_paid > 0 else "مستحق"
                 con.execute(
                     "INSERT INTO debts(id,patient_id,sale_id,amount,paid_amount,due_date,status,notes,created_at,updated_at) "
                     "VALUES(?,?,?,?,?,?,?,?,?,?)",
-                    (debt_id,d.get("patient_id"),nid,patient_amount,0,d.get("due_date") or (date.today()+timedelta(days=30)).isoformat(),
-                     "مستحق",d.get("debt_notes",""),now.isoformat(),now.isoformat())
+                    (debt_id,d.get("patient_id"),nid,patient_amount,credit_paid,d.get("due_date") or (date.today()+timedelta(days=30)).isoformat(),
+                     debt_status,d.get("debt_notes",""),now.isoformat(),now.isoformat())
                 )
-                _audit(con,user_id,"ADD_DEBT","debt",debt_id,inv)
+                _audit(con,user_id,"ADD_DEBT","debt",debt_id,f"{inv} — مدفوع {credit_paid:.2f} — متبقي {patient_amount-credit_paid:.2f}")
 
             # نقاط ولاء قابلة للتخصيص (الافتراضي نقطة لكل 100 من العملة).
             if d.get("patient_id"):
@@ -1060,7 +1105,9 @@ class PharmacyAPI:
             _audit(con, user_id, "ADD_SALE", "sale", nid, inv)
             response = {"id": nid, "invoiceNum": inv, "date": s_date, "time": s_time,
                         "total":total_due,"patientAmount":patient_amount,"insuranceAmount":insurance_amount,
-                        "loyaltyDiscount":loyalty_discount}
+                        "loyaltyDiscount":loyalty_discount,"patientId":d.get("patient_id"),
+                        "patientName":d.get("patient_name"),"creditPaid":credit_paid,
+                        "creditRemaining":round(patient_amount-credit_paid,2) if payment_method == "آجل" else 0}
             if request_id:
                 con.execute("INSERT INTO sale_requests VALUES(?,?,?)",(user_id,request_id,json.dumps(response)))
                 con.execute("DELETE FROM pos_drafts WHERE user_id=? AND draft_id=?",(user_id,request_id))
@@ -1459,9 +1506,21 @@ class PharmacyAPI:
         row = con.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
         con.close(); return _ok(row[0] if row else None)
 
-    def set_setting(self, key: str, value: str):
+    def set_setting(self, key: str, value: str, user_id: str = None):
+        key = str(key or "").strip()
+        if not re.fullmatch(r"[a-z][a-z0-9_]{0,79}", key):
+            return _err("اسم الإعداد غير صالح")
+        if isinstance(value, (dict, list)):
+            value = json.dumps(value, ensure_ascii=False)
+        elif value is None:
+            value = ""
+        else:
+            value = str(value)
+        if len(value.encode("utf-8")) > 2_000_000:
+            return _err("قيمة الإعداد أكبر من الحد المسموح")
         con = _conn()
         con.execute("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)", (key, value))
+        _audit(con, user_id, "UPDATE_SETTING", "setting", key, "تم تحديث الإعداد")
         con.commit(); con.close(); return _ok()
 
     # ── BACKUP / RESTORE [3.14] ───────────────────────────────
@@ -1472,9 +1531,9 @@ class PharmacyAPI:
 
     def get_backup_status(self):
         from backup_store import status as secondary_status
+        from backup_store import managed_backups
         try:
-            os.makedirs(BACKUP_DIR, exist_ok=True)
-            paths = [os.path.join(BACKUP_DIR, f) for f in os.listdir(BACKUP_DIR) if f.endswith(".db")]
+            paths = managed_backups()
             if not paths:
                 return _ok({"last_backup": None, "age_days": None, "stale": True, "secondary": secondary_status()})
             latest = max(paths, key=os.path.getmtime)
@@ -1484,33 +1543,17 @@ class PharmacyAPI:
                         "stale": age_days >= 3, "filename": os.path.basename(latest), "secondary": secondary_status()})
         except Exception as e: return _err(str(e))
 
-    def restore_database(self, backup_path: str):
-        try:
-            if not os.path.isfile(backup_path):
-                return _err("ملف النسخة الاحتياطية غير موجود")
-            # Verify it's a valid SQLite db
-            test = sqlite3.connect(backup_path)
-            test.execute("SELECT name FROM sqlite_master LIMIT 1").fetchone()
-            test.close()
-            # Backup current before restore
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            os.makedirs(BACKUP_DIR, exist_ok=True)
-            pre = os.path.join(BACKUP_DIR, f"pre_restore_{ts}.db")
-            shutil.copy2(DB_PATH, pre)
-            # Restore
-            shutil.copy2(backup_path, DB_PATH)
-            return _ok({"message": "تمت الاستعادة بنجاح", "pre_backup": pre})
-        except Exception as e: return _err(str(e))
+    def restore_database(self, backup_path: str, user_id: str = None):
+        from backup_store import restore_backup
+        try: return _ok(restore_backup(backup_path, user_id or "system"))
+        except (OSError, sqlite3.Error, ValueError) as exc: return _err(str(exc))
 
     def list_backups(self):
+        from backup_store import managed_backups
         try:
-            os.makedirs(BACKUP_DIR, exist_ok=True)
-            files = sorted([
-                f for f in os.listdir(BACKUP_DIR) if f.endswith(".db")
-            ], reverse=True)
             result = []
-            for f in files[:20]:
-                fp = os.path.join(BACKUP_DIR, f)
+            for fp in managed_backups()[:20]:
+                f = os.path.basename(fp)
                 stat = os.stat(fp)
                 result.append({
                     "filename": f,
@@ -1530,6 +1573,8 @@ class PharmacyAPI:
         password = password or ""
         if not username or not password:
             return _err("يرجى إدخال اسم المستخدم وكلمة المرور")
+        if len(username) > 80 or len(password) > 128:
+            return _err("اسم المستخدم أو كلمة المرور غير صحيحة")
 
         now = datetime.now()
         count, lockout_until = _LOGIN_FAILURES.get(username, (0, None))
@@ -1598,8 +1643,9 @@ class PharmacyAPI:
         con.close(); return _ok(dict(row) if row else None)
 
     def change_password(self, uid: str, old_pwd: str, new_pwd: str):
-        if not isinstance(new_pwd, str) or len(new_pwd) < 8:
-            return _err("كلمة المرور يجب ألا تقل عن 8 أحرف")
+        policy_error = _password_policy_error(new_pwd)
+        if policy_error:
+            return _err(policy_error)
         if new_pwd == old_pwd:
             return _err("اختر كلمة مرور مختلفة عن الحالية")
         try:
@@ -1629,8 +1675,17 @@ class PharmacyAPI:
             d   = json.loads(data)
             username = str(d.get("username", "")).strip().casefold()
             full_name = str(d.get("full_name", "")).strip()
-            if not username or not full_name:
+            role = str(d.get("role", "صيدلاني مسؤول"))
+            pwd = d.get("password", "123456")
+            if not 3 <= len(username) <= 50 or any(ch.isspace() or ord(ch) < 32 for ch in username):
+                return _err("اسم المستخدم من 3 إلى 50 حرفًا وبدون مسافات")
+            if not 2 <= len(full_name) <= 100:
                 return _err("اسم المستخدم والاسم الكامل مطلوبان")
+            if role not in _ALLOWED_ROLES:
+                return _err("الدور الوظيفي غير صالح")
+            policy_error = _password_policy_error(pwd, allow_forced_default=True)
+            if policy_error:
+                return _err(policy_error)
             con = _conn()
             # only admin can add users
             if caller_id:
@@ -1642,12 +1697,11 @@ class PharmacyAPI:
             if dup:
                 con.close(); return _err("اسم المستخدم موجود بالفعل")
             nid = _new_id("U")
-            pwd = d.get("password", "123456")
             con.execute(
                 "INSERT INTO users(id,username,password,full_name,role,phone,email,created_at,last_login)"
                 " VALUES(?,?,?,?,?,?,?,?,?)",
                 (nid, username, _hash_password(pwd), full_name,
-                 d.get("role","صيدلاني مسؤول"), d.get("phone",""), d.get("email",""),
+                 role, d.get("phone",""), d.get("email",""),
                  date.today().isoformat(), None)
             )
             _audit(con, caller_id, "ADD_USER", "user", nid, username)
@@ -1658,6 +1712,11 @@ class PharmacyAPI:
         try:
             d   = json.loads(data)
             username = str(d.get("username", "")).strip().casefold() if d.get("username") is not None else ""
+            role = str(d.get("role", ""))
+            if username and (not 3 <= len(username) <= 50 or any(ch.isspace() or ord(ch) < 32 for ch in username)):
+                return _err("اسم المستخدم من 3 إلى 50 حرفًا وبدون مسافات")
+            if role not in _ALLOWED_ROLES:
+                return _err("الدور الوظيفي غير صالح")
             con = _conn()
             if caller_id:
                 caller = con.execute("SELECT role FROM users WHERE id=?", (caller_id,)).fetchone()
@@ -1675,7 +1734,7 @@ class PharmacyAPI:
                 "UPDATE users SET full_name=?, role=?, phone=?, email=?"
                 + (", username=?" if username else "")
                 + " WHERE id=?",
-                ([d.get("full_name"), d.get("role"), d.get("phone",""), d.get("email","")]
+                ([d.get("full_name"), role, d.get("phone",""), d.get("email","")]
                  + ([username] if username else [])
                  + [uid])
             )
@@ -1712,6 +1771,9 @@ class PharmacyAPI:
                 if not caller or caller["role"] != "مدير النظام":
                     con.close(); return _err("غير مصرح — هذه العملية للمدير فقط")
             new_pwd = d.get("new_pwd","123456")
+            policy_error = _password_policy_error(new_pwd, allow_forced_default=True)
+            if policy_error:
+                con.close(); return _err(policy_error)
             con.execute("UPDATE users SET password=? WHERE id=?", (_hash_password(new_pwd), uid))
             _audit(con, caller_id, "RESET_PASSWORD", "user", uid, "")
             con.commit(); con.close(); return _ok()

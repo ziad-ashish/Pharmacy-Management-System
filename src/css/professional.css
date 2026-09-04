@@ -202,6 +202,10 @@ html{font-size:14px}body{background:var(--bg);color:var(--tx);font-family:'Cairo
 [data-theme="dark"] .mf-workspace{background:var(--surface)}
 [data-theme="dark"] .modal-overlay{background:rgba(0,0,0,.68)}
 [data-theme="dark"] ::placeholder{color:#657485!important}
+[data-theme="dark"] .pay-btn.sel{background:var(--teal-600)!important;border-color:var(--teal-500)!important;color:#fff!important}
+[data-theme="dark"] .credit-payment-panel{background:#14202a;border-color:#2b3b48;border-inline-start-color:var(--teal-400);box-shadow:0 8px 20px rgba(0,0,0,.18)}
+[data-theme="dark"] .credit-panel-title>i{background:rgba(47,179,167,.14);color:#72d4ca}
+[data-theme="dark"] .credit-remaining{background:#101923;border-color:#2b3b48}
 
 /* Sidebar 3.0 — readable navigation with consistent icon rhythm. */
 :root{--sb-w:264px;--sb-cw:68px}

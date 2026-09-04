@@ -14,7 +14,9 @@ class WebAuthenticationTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.original_db = api.DB_PATH
+        self.original_backup_dir = api.BACKUP_DIR
         api.DB_PATH = os.path.join(self.tmp.name, "web-auth.db")
+        api.BACKUP_DIR = os.path.join(self.tmp.name, "backups")
         api._LOGIN_FAILURES.clear()
         api.init_db()
         api.seed_if_empty()
@@ -25,6 +27,7 @@ class WebAuthenticationTests(unittest.TestCase):
 
     def tearDown(self):
         api.DB_PATH = self.original_db
+        api.BACKUP_DIR = self.original_backup_dir
         api._LOGIN_FAILURES.clear()
         self.tmp.cleanup()
 
@@ -52,6 +55,9 @@ class WebAuthenticationTests(unittest.TestCase):
         self.assertNotIn("password", current)
         self.assertEqual(self.client.get("/api/get_medicines", headers={"Content-Type": "application/json"}).status_code, 200)
         self.assertTrue(self.client.post("/api/logout", json={}).json["ok"])
+        backups = [name for name in os.listdir(api.BACKUP_DIR) if name.endswith('.db')]
+        self.assertEqual(len(backups), 1)
+        self.assertRegex(backups[0], r'^pharmacy_backup_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}_')
         self.client.set_cookie(COOKIE, token)
         self.assertEqual(self.client.get("/api/get_medicines").status_code, 401)
         self.assertTrue(self.client.post("/api/logout", json={}).json["ok"])
@@ -69,8 +75,59 @@ class WebAuthenticationTests(unittest.TestCase):
     def test_request_cannot_impersonate_admin(self):
         self.login(username="pharmacist", password="123456")
         result = self.client.post("/api/add_user", json={"__user_id": "U001", "username": "intruder", "full_name": "اختبار"})
+        self.assertEqual(result.status_code, 403)
         self.assertFalse(result.json["ok"])
         self.assertEqual(self.client.get("/api/get_current_user/U001").status_code, 403)
+
+    def test_permissions_are_enforced_by_server_not_only_ui(self):
+        self.login(username="assistant", password="123456")
+        # Daily POS reads remain available to the assistant.
+        self.assertEqual(self.client.get("/api/get_medicines").status_code, 200)
+        self.assertEqual(self.client.get("/api/get_dashboard_report").status_code, 200)
+        # Direct API calls cannot bypass hidden navigation/actions.
+        blocked = [
+            ("/api/add_medicine", {"name": "غير مصرح"}),
+            ("/api/add_supplier", {"name": "غير مصرح"}),
+            ("/api/set_setting", {"key": "tax_rate", "value": "99"}),
+            ("/api/add_account", {"name": "غير مصرح"}),
+            ("/api/add_employee", {"full_name": "غير مصرح"}),
+            ("/api/backup_database", {}),
+        ]
+        for path, body in blocked:
+            response = self.client.post(path, json=body)
+            self.assertEqual(response.status_code, 403, path)
+        self.assertEqual(self.client.get("/api/get_audit_log").status_code, 403)
+
+    def test_admin_setting_change_is_validated_and_audited(self):
+        self.login()
+        self.assertFalse(self.client.post("/api/set_setting", json={"key": "../bad", "value": "x"}).json["ok"])
+        changed = self.client.post("/api/set_setting", json={"key": "tax_rate", "value": "0"})
+        self.assertTrue(changed.json["ok"], changed.json)
+        from contextlib import closing
+        with closing(api._conn()) as con:
+            row = con.execute("SELECT action,entity_id,user_id FROM audit_log WHERE action='UPDATE_SETTING' ORDER BY timestamp DESC LIMIT 1").fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(row["entity_id"], "tax_rate")
+            self.assertTrue(row["user_id"])
+
+    def test_security_headers_are_sent(self):
+        response = self.client.get("/")
+        self.assertEqual(response.headers.get("X-Frame-Options"), "DENY")
+        self.assertEqual(response.headers.get("X-Content-Type-Options"), "nosniff")
+        self.assertIn("frame-ancestors 'none'", response.headers.get("Content-Security-Policy", ""))
+
+    def test_user_password_and_role_validation(self):
+        self.login()
+        weak = self.client.post("/api/add_user", json={
+            "username": "weak-user", "full_name": "مستخدم ضعيف",
+            "password": "123", "role": "صيدلاني مسؤول",
+        })
+        self.assertFalse(weak.json["ok"], weak.json)
+        bad_role = self.client.post("/api/add_user", json={
+            "username": "bad-role", "full_name": "مستخدم دور",
+            "password": "StrongPassword1", "role": "مدير مزيف",
+        })
+        self.assertFalse(bad_role.json["ok"], bad_role.json)
 
     def test_change_password_rotates_session_and_revokes_other_sessions(self):
         self.login()

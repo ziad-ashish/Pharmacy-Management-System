@@ -447,7 +447,7 @@ const App = (() => {
           </div>
         </div>
         <div style="display:grid;gap:.75rem;font-size:.85rem">
-          <div style="display:flex;gap:.6rem"><span style="color:var(--tx-3);min-width:110px;flex-shrink:0">اسم المستخدم:</span><span style="color:var(--tx);font-weight:600">${user.username || '—'}</span></div>
+          <div style="display:flex;gap:.6rem"><span style="color:var(--tx-3);min-width:110px;flex-shrink:0">اسم المستخدم:</span><span style="color:var(--tx);font-weight:600">${_esc(user.username || '—')}</span></div>
           <div style="display:flex;gap:.6rem"><span style="color:var(--tx-3);min-width:110px;flex-shrink:0">الهاتف:</span><span style="color:var(--tx);font-weight:600">${user.phone || '—'}</span></div>
           <div style="display:flex;gap:.6rem"><span style="color:var(--tx-3);min-width:110px;flex-shrink:0">البريد:</span><span style="color:var(--tx);font-weight:600">${user.email || '—'}</span></div>
           <div style="display:flex;gap:.6rem"><span style="color:var(--tx-3);min-width:110px;flex-shrink:0">تاريخ الإنشاء:</span><span style="color:var(--tx);font-weight:600">${user.createdAt ? (user.createdAt.split('T')[0]) : '—'}</span></div>
@@ -573,9 +573,9 @@ const App = (() => {
 
       const notifs = [
         ...low.map(m=>({ ico:'fa-box-open', bg:'var(--warn-light)', color:'var(--warn)',
-          text:`مخزون منخفض: <strong>${m.name}</strong> (${m.stock} ${m.unit} متبقي)`, time:'الآن' })),
+          text:`مخزون منخفض: <strong>${_esc(m.name)}</strong> (${Fmt.num(m.stock)} ${_esc(m.unit)} متبقي)`, time:'الآن' })),
         ...exp.map(m=>({ ico:'fa-clock', bg:'var(--err-light)', color:'var(--err)',
-          text:`صلاحية قريبة: <strong>${m.name}</strong> — ${Fmt.expiryBadge(m.expiry)}`, time:'الآن' })),
+          text:`صلاحية قريبة: <strong>${_esc(m.name)}</strong> — ${Fmt.expiryBadge(m.expiry)}`, time:'الآن' })),
       ];
 
       if (!notifs.length) {
@@ -645,18 +645,18 @@ const App = (() => {
         ).slice(0,3);
         if (!fm.length && !fp.length) { drop.classList.add('hidden'); return; }
         drop.innerHTML = [
-          ...fm.map(m=>`<div class="sd-item" data-type="med" data-id="${m.id}">
+          ...fm.map(m=>`<div class="sd-item" data-type="med" data-id="${_esc(m.id)}">
             <div class="sd-icon"><i class="fas fa-pills"></i></div>
             <div>
-              <div class="sd-name">${m.name}</div>
-              <div class="sd-sub">${m.category} — ${Fmt.money(m.price)} — مخزون: ${m.stock}</div>
+              <div class="sd-name">${_esc(m.name)}</div>
+              <div class="sd-sub">${_esc(m.category)} — ${Fmt.money(m.price)} — مخزون: ${Fmt.num(m.stock)}</div>
             </div>
           </div>`),
-          ...fp.map(p=>`<div class="sd-item" data-type="pat" data-id="${p.id}">
+          ...fp.map(p=>`<div class="sd-item" data-type="pat" data-id="${_esc(p.id)}">
             <div class="sd-icon"><i class="fas fa-user-injured"></i></div>
             <div>
-              <div class="sd-name">${p.name}</div>
-              <div class="sd-sub">${p.phone} — ${p.bloodType}</div>
+              <div class="sd-name">${_esc(p.name)}</div>
+              <div class="sd-sub">${_esc(p.phone)} — ${_esc(p.bloodType)}</div>
             </div>
           </div>`),
         ].join('');

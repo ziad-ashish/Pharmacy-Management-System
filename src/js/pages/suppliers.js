@@ -91,19 +91,19 @@ const SuppliersPage = (() => {
     const el=document.getElementById('supCards'); if(!el) return;
     if(!list.length){el.innerHTML='';return;}
     el.innerHTML=list.slice(0,4).map(s=>`
-      <div class="sup-card" data-id="${s.id}">
+      <div class="sup-card" data-id="${_esc(s.id)}">
         <div class="sup-head">
           <div class="sup-ico"><i class="fas fa-building"></i></div>
           <div>
-            <div class="sup-name">${s.name}</div>
-            <div class="sup-contact"><i class="fas fa-user" style="font-size:.65rem"></i> ${s.contact}</div>
+            <div class="sup-name">${_esc(s.name)}</div>
+            <div class="sup-contact"><i class="fas fa-user" style="font-size:.65rem"></i> ${_esc(s.contact)}</div>
             <div style="margin-top:.3rem">${renderStars(s.rating)}</div>
           </div>
-          <span class="badge ${s.status==='نشط'?'bdg-ok':'bdg-err'}" style="margin-right:auto">${s.status}</span>
+          <span class="badge ${s.status==='نشط'?'bdg-ok':'bdg-err'}" style="margin-right:auto">${_esc(s.status)}</span>
         </div>
         <div class="sup-stats">
           <div class="sup-stat"><div class="sup-stat-val">${s.totalOrders}</div><div class="sup-stat-lbl">إجمالي الطلبات</div></div>
-          <div class="sup-stat"><div class="sup-stat-val" style="font-size:.8rem">${s.paymentTerms}</div><div class="sup-stat-lbl">شروط الدفع</div></div>
+          <div class="sup-stat"><div class="sup-stat-val" style="font-size:.8rem">${_esc(s.paymentTerms)}</div><div class="sup-stat-lbl">شروط الدفع</div></div>
         </div>
         <div style="display:flex;gap:.5rem;margin-top:.75rem;justify-content:flex-end">
           <button class="btn btn-outline btn-sm" data-action="edit" data-id="${s.id}"><i class="fas fa-pen"></i> تعديل</button>
@@ -139,14 +139,14 @@ const SuppliersPage = (() => {
     const draw=()=>{
       tbody.innerHTML=pg.slice().map(s=>`
         <tr>
-          <td><code style="font-size:.75rem">${s.id}</code></td>
-          <td class="font-bold">${s.name}</td>
-          <td>${s.contact}</td>
-          <td dir="ltr">${s.phone}</td>
-          <td><span class="badge bdg-slate">${s.paymentTerms}</span></td>
+          <td><code style="font-size:.75rem">${_esc(s.id)}</code></td>
+          <td class="font-bold">${_esc(s.name)}</td>
+          <td>${_esc(s.contact)}</td>
+          <td dir="ltr">${_esc(s.phone)}</td>
+          <td><span class="badge bdg-slate">${_esc(s.paymentTerms)}</span></td>
           <td style="font-weight:700">${s.totalOrders}</td>
           <td>${renderStars(s.rating)}</td>
-          <td><span class="badge ${s.status==='نشط'?'bdg-ok':'bdg-err'}">${s.status}</span></td>
+          <td><span class="badge ${s.status==='نشط'?'bdg-ok':'bdg-err'}">${_esc(s.status)}</span></td>
           <td>
             <div class="td-actions">
               <button class="btn btn-ghost btn-icon sm" data-action="view" data-id="${s.id}"><i class="fas fa-eye"></i></button>
@@ -172,21 +172,21 @@ const SuppliersPage = (() => {
     return `
     <div class="form-row cols-2">
       <div class="form-group"><label class="form-label">اسم الشركة <span class="req">*</span></label>
-        <input class="form-control" id="fSupName" value="${s.name||''}" /></div>
+        <input class="form-control" id="fSupName" value="${_esc(s.name||'')}" /></div>
       <div class="form-group"><label class="form-label">جهة الاتصال <span class="req">*</span></label>
-        <input class="form-control" id="fSupContact" value="${s.contact||''}" /></div>
+        <input class="form-control" id="fSupContact" value="${_esc(s.contact||'')}" /></div>
     </div>
     <div class="form-row cols-2">
       <div class="form-group"><label class="form-label">رقم الهاتف <span class="req">*</span></label>
-        <input class="form-control" id="fSupPhone" value="${s.phone||''}" dir="ltr" /></div>
+        <input class="form-control" id="fSupPhone" value="${_esc(s.phone||'')}" dir="ltr" /></div>
       <div class="form-group"><label class="form-label">البريد الإلكتروني</label>
-        <input class="form-control" id="fSupEmail" value="${s.email||''}" dir="ltr" /></div>
+        <input class="form-control" id="fSupEmail" value="${_esc(s.email||'')}" dir="ltr" /></div>
     </div>
     <div class="form-row cols-2">
       <div class="form-group"><label class="form-label">العنوان</label>
-        <input class="form-control" id="fSupAddr" value="${s.address||''}" /></div>
+        <input class="form-control" id="fSupAddr" value="${_esc(s.address||'')}" /></div>
       <div class="form-group"><label class="form-label">الرقم الضريبي</label>
-        <input class="form-control" id="fSupTax" value="${s.taxNum||''}" dir="ltr" /></div>
+        <input class="form-control" id="fSupTax" value="${_esc(s.taxNum||'')}" dir="ltr" /></div>
     </div>
     <div class="form-row cols-3">
       <div class="form-group"><label class="form-label">شروط الدفع</label>
@@ -218,7 +218,7 @@ const SuppliersPage = (() => {
   function openEdit(id) {
     const s=_allSups.find(x=>x.id===id); if(!s) return;
     Modal.open({
-      title:`<i class="fas fa-pen"></i> تعديل: ${s.name}`,
+      title:`<i class="fas fa-pen"></i> تعديل: ${_esc(s.name)}`,
       size:'lg', body:_formHTML(s),
       foot:`<button class="btn btn-amber" id="saveSupBtn"><i class="fas fa-check"></i> حفظ</button>
             <button class="btn btn-ghost" onclick="Modal.close()">إلغاء</button>`,
@@ -250,22 +250,22 @@ const SuppliersPage = (() => {
     const s=_allSups.find(x=>x.id===id); if(!s) return;
     const meds=_allMeds.filter(m=>m.supplierId===id);
     Modal.open({
-      title:`<i class="fas fa-building"></i> ${s.name}`,
+      title:`<i class="fas fa-building"></i> ${_esc(s.name)}`,
       size:'lg',
       body:`
-        <div class="detail-row"><span class="dr-label">جهة الاتصال</span><span class="dr-val">${s.contact}</span></div>
-        <div class="detail-row"><span class="dr-label">الهاتف</span><span class="dr-val" dir="ltr">${s.phone}</span></div>
-        <div class="detail-row"><span class="dr-label">البريد</span><span class="dr-val" dir="ltr">${s.email||'—'}</span></div>
-        <div class="detail-row"><span class="dr-label">العنوان</span><span class="dr-val">${s.address||'—'}</span></div>
-        <div class="detail-row"><span class="dr-label">الرقم الضريبي</span><span class="dr-val" dir="ltr">${s.taxNum||'—'}</span></div>
-        <div class="detail-row"><span class="dr-label">شروط الدفع</span><span class="dr-val">${s.paymentTerms}</span></div>
+        <div class="detail-row"><span class="dr-label">جهة الاتصال</span><span class="dr-val">${_esc(s.contact)}</span></div>
+        <div class="detail-row"><span class="dr-label">الهاتف</span><span class="dr-val" dir="ltr">${_esc(s.phone)}</span></div>
+        <div class="detail-row"><span class="dr-label">البريد</span><span class="dr-val" dir="ltr">${_esc(s.email||'—')}</span></div>
+        <div class="detail-row"><span class="dr-label">العنوان</span><span class="dr-val">${_esc(s.address||'—')}</span></div>
+        <div class="detail-row"><span class="dr-label">الرقم الضريبي</span><span class="dr-val" dir="ltr">${_esc(s.taxNum||'—')}</span></div>
+        <div class="detail-row"><span class="dr-label">شروط الدفع</span><span class="dr-val">${_esc(s.paymentTerms)}</span></div>
         <div class="detail-row"><span class="dr-label">التقييم</span><span class="dr-val">${renderStars(s.rating)}</span></div>
-        <div class="detail-row"><span class="dr-label">الحالة</span><span class="dr-val"><span class="badge ${s.status==='نشط'?'bdg-ok':'bdg-err'}">${s.status}</span></span></div>
+        <div class="detail-row"><span class="dr-label">الحالة</span><span class="dr-val"><span class="badge ${s.status==='نشط'?'bdg-ok':'bdg-err'}">${_esc(s.status)}</span></span></div>
         <div class="divider"></div>
         <div style="font-weight:700;font-size:.88rem;margin-bottom:.5rem"><i class="fas fa-pills" style="color:var(--teal-500)"></i> الأدوية المرتبطة (${meds.length})</div>
         ${meds.length?meds.map(m=>`
           <div style="display:flex;justify-content:space-between;padding:.4rem 0;border-bottom:1px solid var(--border-2);font-size:.84rem">
-            <span>${m.name}</span><span class="badge bdg-teal">${m.stock} ${m.unit}</span>
+            <span>${_esc(m.name)}</span><span class="badge bdg-teal">${Fmt.num(m.stock)} ${_esc(m.unit)}</span>
           </div>`).join(''):`<p style="color:var(--tx-3);font-size:.84rem">لا توجد أدوية مرتبطة</p>`}`,
       foot:`<button class="btn btn-outline" onclick="Modal.close();SuppliersPage.openEdit('${id}')"><i class="fas fa-pen"></i> تعديل</button>
             <button class="btn btn-ghost" onclick="Modal.close()">إغلاق</button>`,
@@ -274,7 +274,7 @@ const SuppliersPage = (() => {
 
   function deleteSup(id) {
     const s=_allSups.find(x=>x.id===id); if(!s) return;
-    Modal.confirm('حذف المورد',`هل تريد حذف <strong>${s.name}</strong>؟`,async()=>{
+    Modal.confirm('حذف المورد',`هل تريد حذف ${s.name}؟`,async()=>{
       try{await DB.deleteSupplier(id);Toast.ok('تم الحذف',`تم حذف ${s.name}`);await _load();}
       catch(e){Toast.err('خطأ',e.message);}
     });

@@ -12,6 +12,7 @@ const SalesPage = (() => {
   let _allMeds   = [];
   let _prescription = null;
   let _rxDraft = null, _draftPatient = null, _restoring = true, _checkoutBusy = false;
+  let _credit = {name:'', phone:'', paid:0};
   let _useLoyalty = false;
   let _pharmacyName = 'صيدلية الشفاء';
   let _pharmacyLogo = '';
@@ -102,10 +103,19 @@ const SalesPage = (() => {
         <div style="margin-top:.5rem">
           <div style="font-size:.76rem;font-weight:600;color:var(--tx-3);margin-bottom:.4rem">طريقة الدفع</div>
           <div class="pay-btns">
-            <button class="pay-btn sel" data-pm="نقدي"><i class="fas fa-money-bill"></i> نقدي</button>
-            <button class="pay-btn" data-pm="بطاقة"><i class="fas fa-credit-card"></i> بطاقة</button>
-            <button class="pay-btn" data-pm="تحويل"><i class="fas fa-mobile-screen"></i> تحويل</button>
-            <button class="pay-btn" data-pm="آجل"><i class="fas fa-clock"></i> آجل</button>
+            <button type="button" class="pay-btn sel" data-pm="نقدي" aria-pressed="true"><i class="fas fa-money-bill"></i> نقدي</button>
+            <button type="button" class="pay-btn" data-pm="بطاقة" aria-pressed="false"><i class="fas fa-credit-card"></i> بطاقة</button>
+            <button type="button" class="pay-btn" data-pm="تحويل" aria-pressed="false"><i class="fas fa-mobile-screen"></i> تحويل</button>
+            <button type="button" class="pay-btn" data-pm="آجل" aria-pressed="false"><i class="fas fa-clock"></i> آجل</button>
+          </div>
+          <div class="credit-payment-panel" id="creditPaymentPanel" hidden>
+            <div class="credit-panel-title"><i class="fas fa-address-card"></i><div><strong>بيانات البيع الآجل</strong><small>سيُنشأ سجل مديونية مرتبط بالعميل</small></div></div>
+            <label class="credit-field"><span>اسم العميل <b>*</b></span><input id="creditCustomerName" class="form-control" maxlength="100" autocomplete="name" placeholder="اكتب اسم العميل" required></label>
+            <label class="credit-field"><span>رقم التليفون <small>(اختياري)</small></span><input id="creditPhone" class="form-control" type="tel" maxlength="30" autocomplete="tel" inputmode="tel" placeholder="01xxxxxxxxx"></label>
+            <div class="credit-money-grid">
+              <label class="credit-field"><span>دفع الآن</span><input id="creditPaidAmount" class="form-control" type="number" min="0" step="0.01" value="0" inputmode="decimal"></label>
+              <div class="credit-remaining"><span>المتبقي عليه</span><strong id="creditRemaining">0.00 ر.س</strong></div>
+            </div>
           </div>
         </div>
         <button class="checkout-btn" id="checkoutBtn" disabled>
@@ -118,7 +128,7 @@ const SalesPage = (() => {
   }
 
   async function afterRender() {
-    _restoring=true; _cart = []; _discount = 0; _payMethod = 'نقدي'; _prescription = null; _rxDraft=null; _draftPatient=null; _useLoyalty=false; _checkoutBusy=false;
+    _restoring=true; _cart = []; _discount = 0; _payMethod = 'نقدي'; _prescription = null; _rxDraft=null; _draftPatient=null; _credit={name:'',phone:'',paid:0}; _useLoyalty=false; _checkoutBusy=false;
     // الصفر هو الوضع الآمن. لا توجد ضريبة إلا إذا قرأنا قيمة موجبة محفوظة فعلياً.
     TAX_RATE = 0;
     _showTax = false;
@@ -141,7 +151,7 @@ const SalesPage = (() => {
       _payMethod = defaultPaymentSetting === 'بطاقة' ? 'بطاقة' : 'نقدي';
       const parsedMaxDiscount = parseFloat(maxDiscountSetting);
       _maxDiscountPct = Number.isFinite(parsedMaxDiscount) ? Math.max(0, Math.min(100, parsedMaxDiscount)) : 100;
-      document.querySelectorAll('.pay-btn').forEach(b=>b.classList.toggle('sel', b.dataset.pm===_payMethod));
+      _setPayment(_payMethod, false);
       const parsedTax = Number.parseFloat(taxSetting);
       const effectiveTax = Number.isFinite(parsedTax) && parsedTax > 0 ? parsedTax : 0;
       TAX_RATE = effectiveTax / 100;
@@ -155,12 +165,12 @@ const SalesPage = (() => {
       // category chips
       const cf = document.getElementById('posCatFilters');
       if (cf) cf.innerHTML = `<button class="cat-chip active" data-cat="">الكل</button>` +
-        (cats || []).map(c=>`<button class="cat-chip" data-cat="${c}">${c}</button>`).join('');
+        (cats || []).map(c=>`<button class="cat-chip" data-cat="${_esc(c)}">${_esc(c)}</button>`).join('');
 
       // patients list
       const ps = document.getElementById('posPatient');
       if (ps) ps.innerHTML = `<option value="">— عميل عادي —</option>` +
-        (patients || []).map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
+        (patients || []).map(p=>`<option value="${_esc(p.id)}">${_esc(p.name)}</option>`).join('');
 
       renderGrid();
     } catch(e) { Toast.err('خطأ', e.message); }
@@ -202,12 +212,12 @@ const SalesPage = (() => {
 
     document.querySelectorAll('.pay-btn').forEach(btn=>{
       btn.addEventListener('click', ()=>{
-        _payMethod = btn.dataset.pm;
-        document.querySelectorAll('.pay-btn').forEach(b=>b.classList.remove('sel'));
-        btn.classList.add('sel');
-        _persistDraft();
+        _setPayment(btn.dataset.pm);
       });
     });
+    document.getElementById('creditCustomerName')?.addEventListener('input',e=>{_credit.name=e.target.value;_persistDraft();});
+    document.getElementById('creditPhone')?.addEventListener('input',e=>{_credit.phone=e.target.value;_persistDraft();});
+    document.getElementById('creditPaidAmount')?.addEventListener('input',e=>{_credit.paid=Math.max(0,Number(e.target.value)||0);_syncCreditPanel();_persistDraft();});
 
     document.getElementById('checkoutBtn')?.addEventListener('click', checkout);
     document.getElementById('posCameraBtn')?.addEventListener('click',()=>CameraWorkflows.scan({title:'مسح صنف للبيع',context:'sale',allowAuto:true,acceptLabel:'إضافة للسلة',onAccept:async med=>{
@@ -218,11 +228,12 @@ const SalesPage = (() => {
     document.getElementById('addPrescriptionBtn')?.addEventListener('click', _openPrescriptionModal);
     document.getElementById('posPatient')?.addEventListener('change', async e=>{
       _draftPatient=e.target.value||null; _useLoyalty=false; document.getElementById('useLoyalty').checked=false; _persistDraft();
-      if(!e.target.value){document.getElementById('loyaltyOption').style.display='none';return;}
+      if(!e.target.value){document.getElementById('loyaltyOption').style.display='none';_syncCreditPanel();return;}
       try {
-        const [debt,loyalty]=await Promise.all([DB.getPatientDebt(e.target.value),DB.getLoyalty(e.target.value)]);
+        const [debt,loyalty,patient]=await Promise.all([DB.getPatientDebt(e.target.value),DB.getLoyalty(e.target.value),DB.getPatient(e.target.value)]);
         if(debt.balance>0) Toast.warn('تنبيه مديونية',`على العميل دين سابق بقيمة ${Fmt.money(debt.balance)}`);
         const option=document.getElementById('loyaltyOption'); if(option){option.style.display=loyalty.points>0?'block':'none';option.title=`الرصيد ${Number(loyalty.points).toFixed(2)} نقطة`;}
+        if(_payMethod==='آجل'&&patient){_credit.name=patient.name||'';_credit.phone=patient.phone||'';_syncCreditPanel();_persistDraft();}
       } catch(_){}
     });
     document.getElementById('useLoyalty')?.addEventListener('change',e=>{_useLoyalty=e.target.checked;_persistDraft();});
@@ -233,12 +244,12 @@ const SalesPage = (() => {
       const saved=await PosDraft.load();
       if(saved) {
         _cart=saved.cart||[];_discount=Number(saved.discount)||0;_payMethod=saved.paymentMethod||_payMethod;
-        _prescription=saved.prescription||null;_rxDraft=saved.prescriptionDraft||null;_draftPatient=saved.patientId||null;_useLoyalty=!!saved.useLoyalty;
+        _prescription=saved.prescription||null;_rxDraft=saved.prescriptionDraft||null;_draftPatient=saved.patientId||null;_credit={name:saved.credit?.name||'',phone:saved.credit?.phone||'',paid:Number(saved.credit?.paid)||0};_useLoyalty=!!saved.useLoyalty;
         const needed=await Promise.all(_cart.map(item=>DB.getMedicine(item.medId)));
         for(const med of needed.filter(Boolean)){const index=_allMeds.findIndex(m=>m.id===med.id);if(index<0)_allMeds.push(med);else _allMeds[index]=med;}
         document.getElementById('discountInput').value=_discount;
         document.getElementById('posPatient').value=_draftPatient||'';
-        document.querySelectorAll('.pay-btn').forEach(b=>b.classList.toggle('sel',b.dataset.pm===_payMethod));
+        _setPayment(_payMethod, false);
         document.getElementById('loyaltyOption').style.display=_draftPatient?'':'none';
         document.getElementById('useLoyalty').checked=_useLoyalty;
         if(_prescription){const label=document.getElementById('prescriptionStatus');label.style.display='block';label.textContent='روشتة مرتبطة بالمسودة';}
@@ -251,7 +262,39 @@ const SalesPage = (() => {
   function _persistDraft() {
     if(_restoring)return;
     PosDraft.save({cart:_cart,discount:_discount,paymentMethod:_payMethod,patientId:_draftPatient,
-      prescription:_prescription,prescriptionDraft:_rxDraft,useLoyalty:_useLoyalty});
+      prescription:_prescription,prescriptionDraft:_rxDraft,useLoyalty:_useLoyalty,credit:_credit});
+  }
+
+  function _setPayment(method, persist=true) {
+    _payMethod=method;
+    document.querySelectorAll('.pay-btn').forEach(button=>{
+      const selected=button.dataset.pm===method;
+      button.classList.toggle('sel',selected);
+      button.setAttribute('aria-pressed',selected?'true':'false');
+    });
+    _syncCreditPanel();
+    if(method==='آجل'&&!_credit.name){
+      const patientId=document.getElementById('posPatient')?.value;
+      if(patientId)DB.getPatient(patientId).then(patient=>{
+        if(_payMethod!=='آجل'||!patient)return;
+        _credit.name=patient.name||'';_credit.phone=patient.phone||'';_syncCreditPanel();_persistDraft();
+      }).catch(()=>{});
+    }
+    if(persist)_persistDraft();
+  }
+
+  function _syncCreditPanel(total=null) {
+    const panel=document.getElementById('creditPaymentPanel');if(!panel)return;
+    panel.hidden=_payMethod!=='آجل';
+    if(panel.hidden)return;
+    const name=document.getElementById('creditCustomerName'),phone=document.getElementById('creditPhone'),paid=document.getElementById('creditPaidAmount');
+    if(name&&name.value!==_credit.name)name.value=_credit.name;
+    if(phone&&phone.value!==_credit.phone)phone.value=_credit.phone;
+    if(paid&&Number(paid.value)!==Number(_credit.paid))paid.value=Number(_credit.paid)||0;
+    const due=total===null?_cart.reduce((sum,item)=>sum+item.total,0)-Math.min(_discount,_cart.reduce((sum,item)=>sum+item.total,0)):total;
+    if(paid)paid.max=Math.max(0,due).toFixed(2);
+    const remaining=document.getElementById('creditRemaining');
+    if(remaining)remaining.textContent=Fmt.money(Math.max(0,due-(Number(_credit.paid)||0)));
   }
 
   function _setupKeyboardShortcuts(){
@@ -431,15 +474,15 @@ const SalesPage = (() => {
       const oos = (m.sellableStock??m.stock)===0;
       const low = m.stock>0 && m.stock<=m.minStock;
       return `
-      <div class="med-card ${oos?'oos':''}" data-mid="${m.id}">
+      <div class="med-card ${oos?'oos':''}" data-mid="${_esc(m.id)}">
         ${oos?'<span class="oos-badge">نفد</span>':''}
         ${low?'<span class="low-badge">منخفض</span>':''}
-        <div class="med-card-ico">${m.imageUrl?`<img loading="lazy" src="${m.imageUrl}" alt="" style="width:42px;height:42px;object-fit:contain">`:'<i class="fas fa-capsules"></i>'}</div>
-        <div class="med-card-nm">${m.name}</div>
-        <div class="med-card-cat">${m.category}</div>
+        <div class="med-card-ico">${m.imageUrl?`<img loading="lazy" src="${_esc(m.imageUrl)}" alt="" style="width:42px;height:42px;object-fit:contain">`:'<i class="fas fa-capsules"></i>'}</div>
+        <div class="med-card-nm">${_esc(m.name)}</div>
+        <div class="med-card-cat">${_esc(m.category)}</div>
         <div class="med-card-ft">
           <span class="med-card-price">${Fmt.money(m.price)}</span>
-          <span class="med-card-stock">${m.stock} ${m.unit}</span>
+          <span class="med-card-stock">${Fmt.num(m.stock)} ${_esc(m.unit)}</span>
         </div>
       </div>`;
     }).join('');
@@ -488,16 +531,16 @@ const SalesPage = (() => {
       body.innerHTML = _cart.map(item=>`
         <div class="cart-item">
           <div>
-            <div class="ci-name">${item.name}</div>
-            <div class="ci-price">${Fmt.money(item.price)} / ${item.unit}</div>
+            <div class="ci-name">${_esc(item.name)}</div>
+            <div class="ci-price">${Fmt.money(item.price)} / ${_esc(item.unit)}</div>
           </div>
           <div class="qty-ctrl">
-            <button class="qty-btn" data-mid="${item.medId}" data-d="-1">−</button>
+            <button class="qty-btn" data-mid="${_esc(item.medId)}" data-d="-1">−</button>
             <span class="qty-num">${item.qty}</span>
-            <button class="qty-btn" data-mid="${item.medId}" data-d="1">+</button>
+            <button class="qty-btn" data-mid="${_esc(item.medId)}" data-d="1">+</button>
           </div>
           <div style="min-width:68px;text-align:left;font-weight:700;font-size:.84rem;color:var(--teal-600)">${Fmt.money(item.total)}</div>
-          <button class="ci-del" data-mid="${item.medId}"><i class="fas fa-trash"></i></button>
+          <button class="ci-del" data-mid="${_esc(item.medId)}"><i class="fas fa-trash"></i></button>
         </div>`).join('');
 
       body.querySelectorAll('.qty-btn').forEach(b=>b.addEventListener('click',()=>changeQty(b.dataset.mid, parseInt(b.dataset.d))));
@@ -519,6 +562,7 @@ const SalesPage = (() => {
     if (el('crSub'))   el('crSub').textContent   = Fmt.money(sub);
     if (el('crTax'))   el('crTax').textContent   = Fmt.money(tax);
     if (el('crTotal')) el('crTotal').textContent = Fmt.money(tot);
+    _syncCreditPanel(tot);
   }
 
   async function checkout() {
@@ -533,6 +577,14 @@ const SalesPage = (() => {
     const tax   = (sub-disc)*TAX_RATE;
     const total = (sub-disc)+tax;
     const patId = document.getElementById('posPatient')?.value||null;
+    if(_payMethod==='آجل'){
+      _credit.name=document.getElementById('creditCustomerName')?.value.trim()||'';
+      _credit.phone=document.getElementById('creditPhone')?.value.trim()||'';
+      _credit.paid=Number(document.getElementById('creditPaidAmount')?.value||0);
+      if(_credit.name.length<2){Toast.warn('اسم العميل مطلوب','اكتب اسم العميل لإصدار فاتورة آجلة');document.getElementById('creditCustomerName')?.focus();return;}
+      if(!Number.isFinite(_credit.paid)||_credit.paid<0){Toast.warn('المبلغ غير صحيح','اكتب المبلغ الذي دفعه العميل أو اتركه صفرًا');document.getElementById('creditPaidAmount')?.focus();return;}
+      if(_credit.paid>total){Toast.warn('المبلغ أكبر من الإجمالي','لا يمكن أن يكون المدفوع أكبر من قيمة الفاتورة');document.getElementById('creditPaidAmount')?.focus();return;}
+    }
     if(_checkoutBusy)return;
     _checkoutBusy=true;
     const page=document.getElementById('page-sales');page.inert=true;
@@ -555,6 +607,9 @@ const SalesPage = (() => {
         items:       _cart.map(i=>({medId:i.medId,name:i.name,qty:i.qty,price:i.price,total:i.total})),
         subtotal:sub, discount:disc, tax, total,
         paymentMethod: _payMethod,
+        creditCustomerName:_credit.name,
+        creditPhone:_credit.phone,
+        creditPaidAmount:_credit.paid,
         cashier: cashierName,
         prescription: _prescription,
         useLoyalty: _useLoyalty,
@@ -562,13 +617,15 @@ const SalesPage = (() => {
 
       const saleData = {
         invoiceNum: result.invoiceNum, date:result.date, time:result.time,
-        patientName: patient?.name||'عميل عادي',
+        patientName: result.patientName||patient?.name||(_payMethod==='آجل'?_credit.name:'عميل عادي'),
         items: _cart.slice(),
         subtotal:sub, discount:disc, tax, total:result.total??total,
         patientAmount:result.patientAmount??result.total??total,
         insuranceAmount:result.insuranceAmount??0,
         loyaltyDiscount:result.loyaltyDiscount??0,
         paymentMethod: _payMethod,
+        creditPaid:result.creditPaid??0,
+        creditRemaining:result.creditRemaining??0,
         cashier: cashierName,
       };
 
@@ -585,12 +642,13 @@ const SalesPage = (() => {
 
       Toast.ok('تمت العملية', `تم إصدار ${result.invoiceNum} بقيمة ${Fmt.money(result.total??total)}`);
       PosDraft.completed();_restoring=true;
-      _cart=[]; _discount=0; _prescription=null;_rxDraft=null;_draftPatient=null;_useLoyalty=false;
+      _cart=[]; _discount=0; _prescription=null;_rxDraft=null;_draftPatient=null;_credit={name:'',phone:'',paid:0};_useLoyalty=false;
       document.getElementById('prescriptionStatus').style.display='none';
       document.getElementById('addPrescriptionBtn').innerHTML='<i class="fas fa-file-prescription"></i> إضافة روشتة';
       document.getElementById('useLoyalty').checked=false;document.getElementById('loyaltyOption').style.display='none';
       const di=document.getElementById('discountInput'); if(di) di.value='0';
       const pp=document.getElementById('posPatient');    if(pp) pp.value='';
+      _syncCreditPanel(0);
 
       // refresh meds stock
       const meds = await DB.getTopSellingMeds(50); _allMeds = meds;
@@ -610,12 +668,12 @@ const SalesPage = (() => {
       </div>
       <div class="rcp-div"></div>
       <div class="rcp-row"><span>رقم الفاتورة</span><span>${s.invoiceNum}</span></div>
-      <div class="rcp-row"><span>العميل</span><span>${s.patientName}</span></div>
-      ${(_showCashier && s.cashier) ? `<div class="rcp-row"><span>الصيدلي/الطبيب المسؤول</span><span>${s.cashier}</span></div>` : ''}
-      <div class="rcp-row"><span>طريقة الدفع</span><span>${s.paymentMethod}</span></div>
+      <div class="rcp-row"><span>العميل</span><span>${_esc(s.patientName)}</span></div>
+        ${(_showCashier && s.cashier) ? `<div class="rcp-row"><span>الصيدلي/الطبيب المسؤول</span><span>${_esc(s.cashier)}</span></div>` : ''}
+      <div class="rcp-row"><span>طريقة الدفع</span><span>${_esc(s.paymentMethod)}</span></div>
       <div class="rcp-div"></div>
       ${s.items.map(i=>`
-        <div class="rcp-row"><span>${i.name}</span><span>${Fmt.money(i.total)}</span></div>
+        <div class="rcp-row"><span>${_esc(i.name)}</span><span>${Fmt.money(i.total)}</span></div>
         <div class="rcp-row" style="font-size:.72rem;color:var(--tx-3)"><span>${i.qty} × ${Fmt.money(i.price)}</span></div>
       `).join('')}
       <div class="rcp-div"></div>
@@ -624,6 +682,7 @@ const SalesPage = (() => {
       ${s.loyaltyDiscount>0?`<div class="rcp-row"><span>خصم نقاط الولاء</span><span>− ${Fmt.money(s.loyaltyDiscount)}</span></div>`:''}
       ${(_showTax && s.tax>0)?`<div class="rcp-row"><span>الضريبة ${Math.round(TAX_RATE*10000)/100}%</span><span>${Fmt.money(s.tax)}</span></div>`:''}
       ${s.insuranceAmount>0?`<div class="rcp-row"><span>تغطية التأمين</span><span>${Fmt.money(s.insuranceAmount)}</span></div><div class="rcp-row"><span>المطلوب من المريض</span><span>${Fmt.money(s.patientAmount)}</span></div>`:''}
+      ${s.paymentMethod==='آجل'?`<div class="rcp-row"><span>المدفوع الآن</span><span>${Fmt.money(s.creditPaid)}</span></div><div class="rcp-row bold"><span>المتبقي على العميل</span><span>${Fmt.money(s.creditRemaining)}</span></div>`:''}
       <div class="rcp-div"></div>
       <div class="rcp-row total"><span>الإجمالي</span><span>${Fmt.money(s.total)}</span></div>
       <div class="rcp-barcode">

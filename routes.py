@@ -145,7 +145,7 @@ def register_routes(app):
         return _resp(_api.get_prescriptions_report(request.args.get("month", "")))
 
     @app.route("/api/get_top_selling_meds/<int:limit>")
-    def get_top_selling_meds(limit): return _resp(_api.get_top_selling_meds(limit))
+    def get_top_selling_meds(limit): return _resp(_api.get_top_selling_meds(max(1, min(limit, 200))))
 
     @app.route("/api/search_medicines")
     def search_medicines(): return _resp(_api.search_medicines(request.args.get("q", "")))
@@ -170,7 +170,10 @@ def register_routes(app):
         return _resp(_api.import_medicines(text,uid))
 
     @app.route("/api/get_turnover_report")
-    def get_turnover_report(): return _resp(_api.get_turnover_report(request.args.get("days",30)))
+    def get_turnover_report():
+        try: days = int(request.args.get("days", 30))
+        except (TypeError, ValueError): days = 30
+        return _resp(_api.get_turnover_report(max(1, min(days, 366))))
 
     @app.route("/api/get_loyalty/<patient_id>")
     def get_loyalty(patient_id): return _resp(_api.get_loyalty(patient_id))
@@ -225,7 +228,7 @@ def register_routes(app):
     @app.route("/api/set_setting", methods=["POST"])
     def set_setting():
         body = request.get_json(force=True) or {}
-        return _resp(_api.set_setting(body.get("key",""), body.get("value","")))
+        return _resp(_api.set_setting(body.get("key",""), body.get("value",""), g.user_id))
 
     # ── BACKUP ────────────────────────────────────────────────
     @app.route("/api/backup_database", methods=["POST"])
@@ -243,13 +246,16 @@ def register_routes(app):
     @app.route("/api/restore_database", methods=["POST"])
     def restore_database():
         body = request.get_json(force=True) or {}
-        return _resp(_api.restore_database(body.get("backup_path","")))
+        return _resp(_api.restore_database(body.get("backup_path",""), g.user_id))
 
     # ── AUDIT LOG ─────────────────────────────────────────────
     @app.route("/api/get_audit_log")
     def get_audit_log():
-        limit  = int(request.args.get("limit",  100))
-        offset = int(request.args.get("offset", 0))
+        try: limit = int(request.args.get("limit", 100))
+        except (TypeError, ValueError): limit = 100
+        try: offset = int(request.args.get("offset", 0))
+        except (TypeError, ValueError): offset = 0
+        limit, offset = max(1, min(limit, 500)), max(0, offset)
         return _resp(_api.get_audit_log(limit, offset))
 
     # ── AUTH ──────────────────────────────────────────────────
@@ -270,8 +276,17 @@ def register_routes(app):
 
     @app.post("/api/logout")
     def logout():
-        app.extensions["pharmacy_revoke_session"](audit=True)
-        response = jsonify(ok=True, data=None)
+        entry = app.extensions["pharmacy_revoke_session"](audit=True)
+        backup = None
+        warning = ""
+        if entry:
+            try:
+                from backup_store import run_backup
+                backup = run_backup(entry["uid"])
+            except Exception as exc:
+                # A locked/unavailable backup disk must not trap the user in the session.
+                warning = str(exc)
+        response = jsonify(ok=True, data={"backup": backup, "backup_warning": warning})
         response.delete_cookie(COOKIE, path="/")
         return response
 
@@ -384,8 +399,11 @@ def register_routes(app):
     @app.route("/api/get_transactions")
     def get_transactions():
         account_id = request.args.get("account_id")
-        limit  = int(request.args.get("limit",  100))
-        offset = int(request.args.get("offset", 0))
+        try: limit = int(request.args.get("limit", 100))
+        except (TypeError, ValueError): limit = 100
+        try: offset = int(request.args.get("offset", 0))
+        except (TypeError, ValueError): offset = 0
+        limit, offset = max(1, min(limit, 500)), max(0, offset)
         return _resp(_api.get_transactions(account_id, limit, offset))
 
     @app.route("/api/add_transaction", methods=["POST"])

@@ -120,7 +120,7 @@ const SettingsPage = (() => {
       _setupSettingsSearch();
     } catch (e) {
       const c = document.getElementById('setContent');
-      if (c) c.innerHTML = `<div class="alert err"><i class="fas fa-circle-xmark"></i> ${e.message}</div>`;
+      if (c) c.innerHTML = `<div class="alert err"><i class="fas fa-circle-xmark"></i> ${_esc(e.message)}</div>`;
     }
   }
 
@@ -372,7 +372,7 @@ const SettingsPage = (() => {
       const [backups,secondary] = await Promise.all([DB.listBackups(),_api("secondary_backup")]);
       content.innerHTML = `
         <div class="settings-section-head"><div><h2>النسخ الاحتياطي والاستعادة</h2><p>احمِ بيانات المبيعات والمخزون والمستخدمين من الفقد.</p></div><button class="btn btn-primary" id="createBackupBtn"><i class="fas fa-plus"></i> إنشاء نسخة الآن</button></div>
-        <div class="settings-callout safe"><i class="fas fa-shield-halved"></i><div><strong>النسخ تحفظ محليًا</strong><span>يتم إنشاء لقطة سليمة من SQLite دون إيقاف العمل على النظام.</span></div></div>
+        <div class="settings-callout safe"><i class="fas fa-shield-halved"></i><div><strong>النسخ تحفظ محليًا</strong><span>يتم إنشاء لقطة سليمة من SQLite دون إيقاف العمل، ويُحتفظ بآخر 5 نسخ فقط تلقائيًا.</span></div></div>
         <div class="card"><div class="card-head"><span class="card-title">نسخة إضافية خارج المشروع</span></div><div class="card-body">
           <p>اختر مجلدًا على قرص خارجي أو جهاز آخر. مجلد آخر على نفس القرص لا يحمي من تلف القرص.</p>
           <label for="secondaryBackupDir">المسار الكامل للمجلد</label><input id="secondaryBackupDir" class="form-control" dir="ltr" value="${_esc(secondary.directory||'')}" placeholder="E:\\PharmacyBackups">
@@ -389,7 +389,7 @@ const SettingsPage = (() => {
       };
       document.getElementById('createBackupBtn')?.addEventListener('click', async e => {
         const btn=e.currentTarget; btn.disabled=true; btn.innerHTML='<i class="fas fa-circle-notch fa-spin"></i> جارٍ الإنشاء';
-        try { const result=await DB.backupDatabase(); if(result.secondary_error)Toast.warn('المحلية محفوظة؛ الإضافية فشلت',result.secondary_error);else Toast.ok('تم إنشاء النسخة', result.secondary_path?'تم التحقق من النسختين المحلية والإضافية':result.filename || 'تم حفظ قاعدة البيانات'); _renderBackupTab(content); }
+        try { const result=await DB.backupDatabase(); if(result.secondary_error)Toast.warn('المحلية محفوظة؛ الإضافية فشلت',result.secondary_error);else if(result.retention_warning)Toast.warn('تم إنشاء النسخة مع تنبيه',result.retention_warning);else Toast.ok('تم إنشاء النسخة', result.secondary_path?'تم التحقق من النسختين والاحتفاظ بآخر 5 نسخ':result.filename || 'تم حفظ قاعدة البيانات'); _renderBackupTab(content); }
         catch(err){Toast.err('فشل النسخ',err.message);btn.disabled=false;btn.innerHTML='<i class="fas fa-plus"></i> إنشاء نسخة الآن';}
       });
       content.querySelectorAll('.restore-backup').forEach(btn=>btn.addEventListener('click',()=>{
@@ -709,7 +709,7 @@ const SettingsPage = (() => {
       _filterAndRenderUsers();
     } catch (e) {
       const tbody = document.getElementById('usrTbody');
-      if (tbody) tbody.innerHTML = `<tr><td colspan="6"><div class="alert err">${e.message}</div></td></tr>`;
+      if (tbody) tbody.innerHTML = `<tr><td colspan="6"><div class="alert err">${_esc(e.message)}</div></td></tr>`;
     }
   }
 
@@ -1036,7 +1036,7 @@ const SettingsPage = (() => {
           <div class="usr-avatar ${_getRoleMeta(u.role).cls}">${_getAvatarInitials(u.fullName)}</div>
           <div>
             <div style="font-weight:700;color:var(--tx)">${_esc(u.fullName)}</div>
-            <div style="font-size:.76rem;color:var(--tx-3)">اسم الدخول: @${_esc(u.username)} | الصلاحية: ${u.role}</div>
+            <div style="font-size:.76rem;color:var(--tx-3)">اسم الدخول: @${_esc(u.username)} | الصلاحية: ${_esc(u.role)}</div>
           </div>
         </div>
 
